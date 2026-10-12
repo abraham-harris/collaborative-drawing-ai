@@ -25,6 +25,49 @@ npm install
 npm run dev                     # http://localhost:5173 (proxies /api to :5000)
 ```
 
+## Rate drawings with AuDrA
+
+AuDrA is a separate local CPU scorer; it does not change the drawing app's AI
+turns. Place the trained `AuDrA_trained.ckpt` file in `AuDrA/` (it is not stored
+in Git), then put the drawings you want to rate in `AuDrA/user_images/`. The
+scorer rates every supported image in that folder, including any examples you
+leave there.
+
+Use Python 3.12. From the repository root, create a separate environment and
+run the scorer with the commands for your system:
+
+**Linux / WSL (x86-64)**
+
+```bash
+python3.12 -m venv AuDrA/.venv
+AuDrA/.venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu -r AuDrA/requirements-inference.txt
+AuDrA/.venv/bin/python AuDrA/score.py
+```
+
+**Windows PowerShell (64-bit Python)**
+
+```powershell
+py -3.12 -m venv AuDrA\.venv
+AuDrA\.venv\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cpu -r AuDrA\requirements-inference.txt
+AuDrA\.venv\Scripts\python.exe AuDrA\score.py
+```
+
+**Apple Silicon macOS 14+**
+
+```bash
+python3.12 -m venv AuDrA/.venv
+AuDrA/.venv/bin/python -m pip install -r AuDrA/requirements-inference.txt
+AuDrA/.venv/bin/python AuDrA/score.py
+```
+
+Scores are written to [AuDrA_predictions.csv](AuDrA/AuDrA_predictions.csv)
+with `filenames` and `predictions` columns. The CSV is created locally after
+the first run and is not committed to Git; running the command again replaces
+it. Predictions are intended as normalized creativity ratings for drawings like
+AuDrA's training examples, usually around 0–1, though the model does not
+enforce that range. See [AuDrA's local setup notes](AuDrA/README.md) for input
+options and platform limits.
+
 ## Where things live
 
 | What | File |
