@@ -28,8 +28,9 @@ npm run dev                     # http://localhost:5173 (proxies /api to :5000)
 ## Rate drawings with AuDrA
 
 AuDrA is a separate local CPU scorer; it does not change the drawing app's AI
-turns. Place the trained `AuDrA_trained.ckpt` file in `AuDrA/` (it is not stored
-in Git), then put the drawings you want to rate in `AuDrA/user_images/`. The
+turns. Download the [AuDrA checkpoint from OSF](https://osf.io/kqn9v/files/eahmk)
+and save it as `AuDrA/AuDrA_trained.ckpt` (it is not stored in Git). Then put
+the drawings you want to rate in `AuDrA/user_images/`. The
 scorer rates every supported image in that folder, including any examples you
 leave there.
 

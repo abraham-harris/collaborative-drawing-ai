@@ -1,6 +1,8 @@
 # Local AuDrA scoring
 
 `score.py` loads the supplied checkpoint and scores images in `user_images/`.
+Download the [AuDrA checkpoint from OSF](https://osf.io/kqn9v/files/eahmk)
+and save it as `AuDrA/AuDrA_trained.ckpt` from the repository root.
 It keeps AuDrA's inference packages separate from `backend/.venv` and does not
 change the deployed Flask app.
 
@@ -39,8 +41,7 @@ The original `AuDrA_run.py` and Linux GPU environment snapshot are retained as s
 The tutorial's Conda environment includes training-only packages; this inference
 path needs only CPU PyTorch, torchvision, and Pillow. Do not use the same
 `AuDrA/.venv` from both Windows Python and WSL Python. The checkpoint is not
-tracked in Git, so other contributors need to obtain `AuDrA_trained.ckpt`
-separately and place it in this folder. Intel Macs are not covered by the
+tracked in Git. Intel Macs are not covered by the
 pinned PyTorch wheels above.
 
 The supplied AuDrA code identifies its license as CC BY-NC-SA 4.0; review its
