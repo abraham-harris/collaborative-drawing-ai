@@ -9,6 +9,10 @@ backend/    Flask server + AI model stub
 
 ## Running
 
+**Hosted app:** [collaborative-drawing-ai.vercel.app](https://collaborative-drawing-ai.vercel.app/)
+
+To run locally, start the backend and frontend in separate terminals:
+
 **Backend** (terminal 1):
 ```bash
 cd backend
