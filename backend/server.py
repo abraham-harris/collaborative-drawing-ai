@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request
 from PIL import Image
 
 from ai_model import generate_drawing
+from drawing_models import DEFAULT_MODE, MODELS, RANDOM, SUBJECTS
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB
@@ -37,6 +38,11 @@ def health():
     return jsonify({"ok": True})
 
 
+@app.get("/api/subjects")
+def subjects():
+    return jsonify({"subjects": SUBJECTS, "random": RANDOM})
+
+
 @app.post("/api/turn")
 def turn():
     payload = request.get_json(silent=True)
@@ -48,14 +54,27 @@ def turn():
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": f"Could not decode image: {exc}"}), 400
 
-    result, message = generate_drawing(
-        image=image,
-        actions=payload.get("actions", []),
-        turn=int(payload.get("turn", 1)),
-        total_turns=int(payload.get("totalTurns", 1)),
-    )
+    mode = payload.get("mode", DEFAULT_MODE)
+    if mode not in MODELS:
+        return jsonify({"error": f"Unknown mode {mode!r}; expected one of {sorted(MODELS)}"}), 400
 
-    response = {"image": encode_data_url(result)}
+    subject = payload.get("subject", RANDOM)
+    if subject != RANDOM and subject not in SUBJECTS:
+        return jsonify({"error": f"Unknown subject {subject!r}; see GET /api/subjects"}), 400
+
+    try:
+        result, message, ai_actions, subject = generate_drawing(
+            image=image,
+            actions=payload.get("actions", []),
+            turn=int(payload.get("turn", 1)),
+            total_turns=int(payload.get("totalTurns", 1)),
+            mode=mode,
+            subject=subject,
+        )
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+    response = {"image": encode_data_url(result), "mode": mode, "subject": subject, "aiActions": ai_actions}
     if message:
         response["message"] = message
     return jsonify(response)
