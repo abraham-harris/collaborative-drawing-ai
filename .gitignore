@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 venv/
 .env
+/AuDrA/AuDrA_predictions.csv
+/AuDrA/AuDrA_trained.ckpt
+/AuDrA/user_images/*
+!/AuDrA/user_images/.gitkeep
