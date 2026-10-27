@@ -30,6 +30,9 @@ export interface DrawAction {
   points: Point[];
 }
 
+/** Which drawing model the AI uses (keys of MODELS in backend/drawing_models). */
+export type AIMode = 'complete' | 'continue';
+
 /** Body POSTed to the Python server when the human clicks Submit. */
 export interface SubmitPayload {
   /** 1-based index of the current turn. */
@@ -41,6 +44,10 @@ export interface SubmitPayload {
   image: string;
   /** Vector record of what the human drew during this turn. */
   actions: DrawAction[];
+  /** Which drawing model should respond. */
+  mode: AIMode;
+  /** What the AI should draw: one of SUBJECTS, or 'random'. */
+  subject: string;
 }
 
 /** Response from the Python server. */
@@ -49,6 +56,12 @@ export interface AIResponse {
   image: string;
   /** Optional text from the AI (e.g. what it added). */
   message?: string;
+  /** The model that responded. */
+  mode?: AIMode;
+  /** The subject the AI drew (resolved if 'random' was requested). */
+  subject?: string;
+  /** The strokes the AI added, in the same format as the human's actions. */
+  aiActions?: DrawAction[];
 }
 
 export type Phase = 'human' | 'ai' | 'done';

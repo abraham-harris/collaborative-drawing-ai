@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { submitDrawing } from './api';
 import DrawingCanvas, { type DrawingCanvasHandle } from './components/DrawingCanvas';
+import ModeSelector from './components/ModeSelector';
 import Toolbar from './components/Toolbar';
 import { TOOL_SHORTCUTS } from './lib/tools';
-import { CANVAS_HEIGHT, CANVAS_WIDTH, NUM_TURNS } from './config';
-import type { BrushSettings, Phase } from './types';
+import { CANVAS_HEIGHT, CANVAS_WIDTH, DEFAULT_AI_MODE, DEFAULT_SUBJECT, NUM_TURNS } from './config';
+import type { AIMode, BrushSettings, Phase } from './types';
 import './App.css';
 
 export default function App() {
@@ -21,6 +22,8 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('human');
   const [error, setError] = useState<string | null>(null);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
+  const [aiMode, setAiMode] = useState<AIMode>(DEFAULT_AI_MODE);
+  const [subject, setSubject] = useState<string>(DEFAULT_SUBJECT);
 
   const drawingDisabled = phase !== 'human';
   const updateSettings = (patch: Partial<BrushSettings>) => setSettings((s) => ({ ...s, ...patch }));
@@ -38,6 +41,8 @@ export default function App() {
         height: CANVAS_HEIGHT,
         image: canvas.exportPNG(),
         actions: canvas.getActions(),
+        mode: aiMode,
+        subject,
       });
       await canvas.loadImage(response.image);
       setAiMessage(response.message ?? null);
@@ -51,7 +56,7 @@ export default function App() {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('human');
     }
-  }, [phase, turn]);
+  }, [phase, turn, aiMode, subject]);
 
   const handleRestart = () => {
     canvasRef.current?.reset();
@@ -125,6 +130,14 @@ export default function App() {
         </div>
       </header>
 
+      <ModeSelector
+        mode={aiMode}
+        onChange={setAiMode}
+        subject={subject}
+        onSubjectChange={setSubject}
+        disabled={phase === 'ai'}
+      />
+
       {error && (
         <div className="banner banner-error" role="alert">
           <strong>Couldn't reach the AI:</strong> {error}
@@ -154,6 +167,13 @@ export default function App() {
           onHistoryChange={setHistory}
         />
       </main>
+
+      <footer className="credits">
+        AI drawings by{' '}
+        <a href="https://arxiv.org/abs/1704.03477" target="_blank" rel="noreferrer">SketchRNN</a>, trained on the{' '}
+        <a href="https://quickdraw.withgoogle.com/data/" target="_blank" rel="noreferrer">Quick, Draw! dataset</a>{' '}
+        (Google, CC BY 4.0).
+      </footer>
     </div>
   );
 }
