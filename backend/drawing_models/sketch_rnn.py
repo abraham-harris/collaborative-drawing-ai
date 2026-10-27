@@ -85,8 +85,10 @@ class SketchRNN:
         h = np.tanh(c) * _sigmoid(o)
         return c, h
 
-    def sample(self, h: np.ndarray, temperature: float, rng: np.random.Generator) -> list[float]:
-        """Sample the next [dx, dy, pen_down, pen_up, end] from the mixture density output."""
+    def sample(self, h: np.ndarray, temperature: float, rng: np.random.Generator,
+               keep_pen_down: bool = False) -> list[float]:
+        """Sample the next [dx, dy, pen_down, pen_up, end] from the mixture density output.
+        With `keep_pen_down`, lifting the pen or ending the drawing is not allowed."""
         z = h @ self.out_w + self.out_b
         pen_logits, rest = z[:3], z[3:]
         pi, mu_x, mu_y, s_x, s_y, corr = np.split(rest, 6)
@@ -102,37 +104,44 @@ class SketchRNN:
         dx = np.sqrt(1 - corr[k] ** 2) * s_x[k] * z1 + corr[k] * s_x[k] * z2 + mu_x[k]
         dy = s_y[k] * z2 + mu_y[k]
         p = [0.0, 0.0, 0.0]
-        p[rng.choice(3, p=pen)] = 1.0
+        p[0 if keep_pen_down else rng.choice(3, p=pen)] = 1.0
         return [float(dx) * self.scale_factor, float(dy) * self.scale_factor, *p]
 
     # --- drawing -----------------------------------------------------------------
 
-    def draw(self, prime: list[Polyline] | None, temperature: float, rng: np.random.Generator,
-             max_steps: int | None = None) -> Sketch:
-        """Generate a sketch. With `prime`, the model first reads those polylines
-        (data units, absolute; the first point is the origin) and then continues
-        the drawing. Returned strokes are relative to the same origin."""
-        state = self.zero_state()
-        state = self.update([0, 0, 1, 0, 0], state)
-        x = y = 0.0
-        pen_down = True
-        if prime:
-            ox, oy = prime[0][0]
-            px, py = ox, oy
-            for line in prime:
-                for j, (lx, ly) in enumerate(line):
-                    if line is prime[0] and j == 0:
-                        continue  # the origin itself isn't a step
-                    last = j == len(line) - 1
-                    state = self.update([lx - px, ly - py, 0 if last else 1, 1 if last else 0, 0], state)
-                    px, py = lx, ly
-            x, y = px - ox, py - oy
-            pen_down = False  # the human lifted the pen after their last stroke
+    def prime(self, lines: list[Polyline] | None, hold_last: bool = False) -> "Cursor":
+        """Have the model read existing polylines (data units, absolute) as if it
+        had drawn them itself. The first point of the first line is the origin.
 
+        With `hold_last`, the pen stays down at the end of the last line, so the
+        next thing the model draws extends that line instead of starting a new one."""
+        state = self.update([0, 0, 1, 0, 0], self.zero_state())
+        if not lines:
+            return Cursor(state, 0.0, 0.0, pen_down=True)
+        ox, oy = lines[0][0]
+        px, py = ox, oy
+        for i, line in enumerate(lines):
+            for j, (lx, ly) in enumerate(line):
+                if i == 0 and j == 0:
+                    continue  # the origin itself isn't a step
+                lift = j == len(line) - 1 and not (hold_last and i == len(lines) - 1)
+                state = self.update([lx - px, ly - py, 0 if lift else 1, 1 if lift else 0, 0], state)
+                px, py = lx, ly
+        return Cursor(state, px - ox, py - oy, pen_down=hold_last)
+
+    def generate(self, cursor: "Cursor", temperature: float, rng: np.random.Generator,
+                 max_steps: int | None = None, stop_at_lift: bool = False,
+                 min_length: float = 0.0) -> Sketch:
+        """Keep drawing from `cursor` (which is not modified, so it can be reused to
+        sample several alternatives). Returned strokes are relative to the origin.
+        With `stop_at_lift`, stop the first time the model lifts the pen.
+        With `min_length` (data units), the pen can't lift until it has drawn that far."""
+        state, x, y, pen_down = cursor.state, cursor.x, cursor.y, cursor.pen_down
+        drawn = 0.0
         strokes: list[Polyline] = []
         current: Polyline | None = None
         for _ in range(max_steps or self.max_seq_len):
-            step = self.sample(state[1], temperature, rng)
+            step = self.sample(state[1], temperature, rng, keep_pen_down=pen_down and drawn < min_length)
             if step[4] == 1.0:
                 if current and len(current) > 1:
                     strokes.append(current)
@@ -142,16 +151,59 @@ class SketchRNN:
                 if current is None:
                     current = [(x, y)]
                 current.append((nx, ny))
+                drawn += float(np.hypot(step[0], step[1]))
             if step[3] == 1.0 and current is not None:  # pen lifts after this point
                 if len(current) > 1:
                     strokes.append(current)
                 current = None
+                if stop_at_lift:
+                    return Sketch(strokes, finished=True)
             pen_down = step[2] == 1.0
             x, y = nx, ny
             state = self.update(step, state)
         if current and len(current) > 1:
             strokes.append(current)
         return Sketch(strokes, finished=False)
+
+    def draw(self, prime: list[Polyline] | None, temperature: float, rng: np.random.Generator,
+             max_steps: int | None = None) -> Sketch:
+        """Generate a sketch, optionally after reading `prime` (see `prime`)."""
+        return self.generate(self.prime(prime), temperature, rng, max_steps)
+
+
+@dataclass(frozen=True)
+class Cursor:
+    """The model's memory and pen position after reading part of a drawing."""
+
+    state: tuple[np.ndarray, np.ndarray]
+    x: float
+    y: float
+    pen_down: bool
+
+
+_typical_size: dict[str, float] = {}
+
+
+def typical_size(model: SketchRNN, rng: np.random.Generator) -> float:
+    """Median size (data units) of the drawings this model makes on its own."""
+    if model.name not in _typical_size:
+        sizes = []
+        for _ in range(3):
+            sk = model.draw(None, 0.25, rng)
+            if sk.strokes:
+                xs = [p[0] for s in sk.strokes for p in s]
+                ys = [p[1] for s in sk.strokes for p in s]
+                sizes.append(max(max(xs) - min(xs), max(ys) - min(ys)))
+        _typical_size[model.name] = float(np.median(sizes)) if sizes else 900.0
+    return _typical_size[model.name]
+
+
+def canvas_scale(model: SketchRNN, user_size: float, canvas_size: float, rng: np.random.Generator,
+                 progress: float = 0.7) -> float:
+    """Canvas px per data unit, chosen so a human drawing `user_size` px across reads
+    as `progress` of a full drawing, while a full drawing still fits on the canvas."""
+    full = typical_size(model, rng)
+    return min(max(user_size, 40.0) / (progress * full), 0.95 * canvas_size / full)
 
 
 # --- loading -------------------------------------------------------------------

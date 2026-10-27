@@ -16,7 +16,7 @@ export const AI_MODES: { id: AIMode; label: string; description: string }[] = [
   {
     id: 'continue',
     label: 'Continue',
-    description: 'Picks up the pen where your last line ended and draws the subject from there (SketchRNN).',
+    description: 'Extends the ends of your lines, then keeps drawing until they become the subject (SketchRNN).',
   },
 ];
 export const DEFAULT_AI_MODE: AIMode = 'complete';

@@ -135,14 +135,6 @@ button.link { border: none; background: none; text-decoration: underline; paddin
 }
 .canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .canvas-preview { touch-action: none; }
-.canvas-wrap.is-disabled .canvas { filter: saturate(0.85); }
-.canvas-wrap.is-disabled::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: rgba(255, 255, 255, 0.25);
-  pointer-events: none;
-}
 
 @media (max-width: 760px) {
   .workspace { flex-direction: column-reverse; }

@@ -65,7 +65,7 @@ Choose a mode with the **AI partner** switch and what to draw with **Subject**: 
 | Mode | File | What it does |
 |---|---|---|
 | **Complete** | `complete_model.py` | SketchRNN reads the human's strokes as the start of the subject, then finishes the drawing in place. Draw a cat's head, and it adds the ears and whiskers. |
-| **Continue** | `continue_model.py` | SketchRNN draws the subject starting exactly where the human's last line ended, so that line flows into the AI's drawing. |
+| **Continue** | `continue_model.py` | SketchRNN extends the human's strokes: for each one, it reads the whole drawing and keeps the pen down at that stroke's end, so its line grows out of the human's. Then it keeps drawing until the subject is complete. Its first marks always grow out of the human's lines; Complete only adds separate new strokes. |
 
 Where the drawings come from:
 
