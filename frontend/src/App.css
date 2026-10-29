@@ -15,6 +15,7 @@
   gap: 12px 20px;
 }
 .app-header h1 { margin: 0; font-size: 1.35rem; font-weight: 650; }
+.header-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .turn-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 220px; }
 .turn-badge {
   padding: 3px 10px;
@@ -60,6 +61,8 @@ button.link { border: none; background: none; text-decoration: underline; paddin
 .banner { padding: 10px 14px; border-radius: var(--radius); font-size: 0.92rem; }
 .banner-error { background: var(--danger-soft); color: var(--danger); border: 1px solid currentColor; }
 .banner-ai { background: var(--accent-soft); }
+.banner-score { background: var(--accent-soft); display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.banner-score span { color: var(--text-muted); }
 
 /* Workspace */
 .workspace { display: flex; gap: 16px; align-items: flex-start; }

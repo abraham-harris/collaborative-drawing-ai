@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { submitDrawing } from './api';
+import { scoreDrawing, submitDrawing } from './api';
 import DrawingCanvas, { type DrawingCanvasHandle } from './components/DrawingCanvas';
 import ModeSelector from './components/ModeSelector';
 import Toolbar from './components/Toolbar';
@@ -24,6 +24,10 @@ export default function App() {
   const [aiMessage, setAiMessage] = useState<string | null>(null);
   const [aiMode, setAiMode] = useState<AIMode>(DEFAULT_AI_MODE);
   const [subject, setSubject] = useState<string>(DEFAULT_SUBJECT);
+  const [creativityScore, setCreativityScore] = useState<number | null>(null);
+  const [scoreError, setScoreError] = useState<string | null>(null);
+  const [isScoring, setIsScoring] = useState(false);
+  const scoreAbortRef = useRef<AbortController | null>(null);
 
   const drawingDisabled = phase !== 'human';
   const updateSettings = (patch: Partial<BrushSettings>) => setSettings((s) => ({ ...s, ...patch }));
@@ -59,11 +63,36 @@ export default function App() {
   }, [phase, turn, aiMode, subject]);
 
   const handleRestart = () => {
+    scoreAbortRef.current?.abort();
+    scoreAbortRef.current = null;
     canvasRef.current?.reset();
     setTurn(1);
     setPhase('human');
     setError(null);
     setAiMessage(null);
+    setCreativityScore(null);
+    setScoreError(null);
+    setIsScoring(false);
+  };
+
+  const handleRate = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas || phase !== 'done' || isScoring) return;
+    const controller = new AbortController();
+    scoreAbortRef.current = controller;
+    setIsScoring(true);
+    setScoreError(null);
+    try {
+      const value = await scoreDrawing(canvas.exportPNG(), controller.signal);
+      if (!controller.signal.aborted) setCreativityScore(value);
+    } catch (err) {
+      if (!controller.signal.aborted) setScoreError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (!controller.signal.aborted) {
+        setIsScoring(false);
+        scoreAbortRef.current = null;
+      }
+    }
   };
 
   const handleDownload = () => {
@@ -119,9 +148,14 @@ export default function App() {
         </div>
         <div className="header-actions">
           {phase === 'done' ? (
-            <button type="button" className="primary" onClick={handleRestart}>
-              Start over
-            </button>
+            <>
+              <button type="button" onClick={handleRate} disabled={isScoring}>
+                {isScoring ? 'Rating creativity…' : 'Rate creativity'}
+              </button>
+              <button type="button" className="primary" onClick={handleRestart}>
+                Start over
+              </button>
+            </>
           ) : (
             <button type="button" className="primary" onClick={handleSubmit} disabled={phase !== 'human'}>
               {phase === 'ai' ? 'Waiting for AI…' : 'Submit to AI'}
@@ -147,6 +181,17 @@ export default function App() {
         </div>
       )}
       {aiMessage && !error && <div className="banner banner-ai">🤖 {aiMessage}</div>}
+      {scoreError && (
+        <div className="banner banner-error" role="alert">
+          <strong>Couldn't rate creativity:</strong> {scoreError}
+        </div>
+      )}
+      {creativityScore !== null && (
+        <div className="banner banner-score" role="status">
+          AuDrA creativity estimate: <strong>{creativityScore.toFixed(2)}</strong>
+          <span>For drawings similar to AuDrA's training examples.</span>
+        </div>
+      )}
 
       <main className="workspace">
         <Toolbar
@@ -173,6 +218,9 @@ export default function App() {
         <a href="https://arxiv.org/abs/1704.03477" target="_blank" rel="noreferrer">SketchRNN</a>, trained on the{' '}
         <a href="https://quickdraw.withgoogle.com/data/" target="_blank" rel="noreferrer">Quick, Draw! dataset</a>{' '}
         (Google, CC BY 4.0).
+        {' '}Creativity estimates by{' '}
+        <a href="https://doi.org/10.31234/osf.io/t63dm" target="_blank" rel="noreferrer">AuDrA</a>{' '}
+        (Patterson et al., CC BY-NC-SA 4.0).
       </footer>
     </div>
   );
