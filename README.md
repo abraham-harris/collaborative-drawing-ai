@@ -31,8 +31,11 @@ npm run dev                     # http://localhost:5173 (proxies /api to :5000)
 
 ## Rate drawings with AuDrA
 
-AuDrA is a separate local CPU scorer; it does not change the drawing app's AI
-turns. Download the [AuDrA checkpoint from OSF](https://osf.io/kqn9v/files/eahmk)
+The hosted app can score a completed human/AI drawing with **Rate creativity**.
+It sends the current PNG to `POST /api/score`, scores it in memory, and displays
+AuDrA's estimate. The app does not save drawings or scores on the server.
+
+The same model also has a local batch scorer. Download the [AuDrA checkpoint from OSF](https://osf.io/kqn9v/files/eahmk)
 and save it as `AuDrA/AuDrA_trained.ckpt` (it is not stored in Git). Then put
 the drawings you want to rate in `AuDrA/user_images/`. The
 scorer rates every supported image in that folder, including any examples you
@@ -73,6 +76,19 @@ AuDrA's training examples, usually around 0–1, though the model does not
 enforce that range. See [AuDrA's local setup notes](AuDrA/README.md) for input
 options and platform limits.
 
+### Vercel preview setup
+
+The checkpoint stays out of Git. Create a **private** Vercel Blob store linked
+to the project and upload the local file with `vercel blob put
+AuDrA/AuDrA_trained.ckpt --access private`. Copy the returned private blob URL
+into the Preview environment variable `AUDRA_CHECKPOINT_BLOB_URL`. Make sure
+`BLOB_READ_WRITE_TOKEN` for that store is also available to Preview functions.
+The server verifies the checkpoint's SHA-256 before loading it. For older Vercel
+projects, set `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` in the Preview environment to
+opt into Large Functions. A branch push produces a preview URL for live testing
+without changing the production site. The first score on a cold function will
+take longer because it downloads and loads the checkpoint.
+
 ## Where things live
 
 | What | File |
@@ -82,6 +98,7 @@ options and platform limits.
 | AI entry point: picks the model, renders its strokes | `backend/ai_model.py` → `generate_drawing()` |
 | The drawing models | `backend/drawing_models/` |
 | HTTP endpoint `POST /api/turn` | `backend/server.py` |
+| HTTP endpoint `POST /api/score` | `backend/server.py` and `backend/audra_service.py` |
 | Request/response types | `frontend/src/types.ts` |
 
 ## API contract
@@ -101,6 +118,11 @@ options and platform limits.
 `mode` is `"complete"` (the default) or `"continue"`. `subject` is a category from `GET /api/subjects`, or `"random"` (the default).
 
 Response: `{ "image": "data:image/png;base64,...", "message": "optional text", "mode": "complete", "subject": "cat", "aiActions": [ ...same shape as actions ] }`
+
+`POST /api/score` request: `{ "image": "data:image/png;base64,..." }`
+
+Response: `{ "score": 0.42 }`. The number is AuDrA's raw estimate; it is not
+clamped to 0–1 and should not be interpreted as a general creativity score.
 
 ## AI drawing models
 

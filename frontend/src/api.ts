@@ -18,3 +18,22 @@ export async function submitDrawing(payload: SubmitPayload): Promise<AIResponse>
   }
   return data;
 }
+
+/** Sends the finished canvas to AuDrA and returns its raw estimate. */
+export async function scoreDrawing(image: string, signal?: AbortSignal): Promise<number> {
+  const res = await fetch(`${API_BASE_URL}/api/score`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image }),
+    signal,
+  });
+  const data = (await res.json().catch(() => null)) as { score?: unknown; error?: unknown } | null;
+  if (!res.ok) {
+    const detail = typeof data?.error === 'string' ? `: ${data.error}` : '';
+    throw new Error(`Scoring server responded ${res.status}${detail}`);
+  }
+  if (typeof data?.score !== 'number' || !Number.isFinite(data.score)) {
+    throw new Error('Scoring server response is missing a valid score');
+  }
+  return data.score;
+}

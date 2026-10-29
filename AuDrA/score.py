@@ -48,6 +48,20 @@ def load_model(checkpoint_path: Path) -> nn.Module:
     return model.eval()
 
 
+def score_image(image: Image.Image, model: nn.Module) -> float:
+    """Score one PIL image using the same preprocessing as the batch CLI."""
+    transform = transforms.Compose(
+        [
+            transforms.Resize(224),
+            transforms.ToTensor(),
+            transforms.Normalize([0.1612] * 3, [0.4075] * 3),
+        ]
+    )
+    prepared = transform(ImageOps.invert(image.convert("RGB"))).unsqueeze(0)
+    with torch.inference_mode():
+        return model(prepared).item()
+
+
 def score_images(input_dir: Path, checkpoint_path: Path) -> list[tuple[str, float]]:
     paths = sorted(
         path for path in input_dir.iterdir()
@@ -56,20 +70,11 @@ def score_images(input_dir: Path, checkpoint_path: Path) -> list[tuple[str, floa
     if not paths:
         raise ValueError(f"No supported images found in {input_dir}")
 
-    transform = transforms.Compose(
-        [
-            transforms.Resize(224),
-            transforms.ToTensor(),
-            transforms.Normalize([0.1612] * 3, [0.4075] * 3),
-        ]
-    )
     model = load_model(checkpoint_path)
     scores = []
-    with torch.inference_mode():
-        for path in paths:
-            with Image.open(path) as image:
-                prepared = transform(ImageOps.invert(image.convert("RGB"))).unsqueeze(0)
-            scores.append((path.name, model(prepared).item()))
+    for path in paths:
+        with Image.open(path) as image:
+            scores.append((path.name, score_image(image, model)))
     return scores
 
 
