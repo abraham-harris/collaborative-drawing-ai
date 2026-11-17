@@ -7,7 +7,7 @@ import os
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.parse import unquote, urlsplit
 
 from PIL import Image
 
@@ -26,27 +26,37 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _stream_checkpoint(pathname: str):
+    from vercel.blob import sync as blob
+
+    return blob.stream_blob(pathname, access="private")
+
+
 def _checkpoint_path() -> Path:
     if LOCAL_CHECKPOINT.is_file():
         return LOCAL_CHECKPOINT
 
     blob_url = os.environ.get("AUDRA_CHECKPOINT_BLOB_URL")
-    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
-    if not blob_url or not token:
+    if not blob_url or not (os.environ.get("BLOB_STORE_ID") or os.environ.get("BLOB_READ_WRITE_TOKEN")):
         raise RuntimeError("AuDrA checkpoint storage is not configured")
+
+    # Use a pathname so the connected store determines the destination, even if
+    # the saved URL contains an older store hostname.
+    pathname = unquote(urlsplit(blob_url).path.lstrip("/"))
+    if not pathname:
+        raise RuntimeError("AuDrA checkpoint URL has no pathname")
 
     cached = Path(tempfile.gettempdir()) / f"audra-{CHECKPOINT_SHA256[:16]}.ckpt"
     if cached.is_file() and _sha256(cached) == CHECKPOINT_SHA256:
         return cached
 
-    request = Request(blob_url, headers={"Authorization": f"Bearer {token}"})
     digest = hashlib.sha256()
     size = 0
     with tempfile.NamedTemporaryFile(dir=cached.parent, prefix="audra-", suffix=".tmp", delete=False) as file:
         temp_path = Path(file.name)
         try:
-            with urlopen(request, timeout=60) as response:
-                while chunk := response.read(1024 * 1024):
+            with _stream_checkpoint(pathname) as download:
+                for chunk in download:
                     size += len(chunk)
                     if size > MAX_CHECKPOINT_BYTES:
                         raise RuntimeError("AuDrA checkpoint is larger than expected")
@@ -68,6 +78,11 @@ def _model():
 
 
 def score_drawing(image: Image.Image) -> float:
+    from flask import has_request_context, request
+    from vercel.headers import set_headers
+
+    if has_request_context():
+        set_headers(request.headers)
     from AuDrA.score import score_image
 
     return score_image(image, _model())

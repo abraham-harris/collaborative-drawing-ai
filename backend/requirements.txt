@@ -1,3 +1,5 @@
 flask>=3.0
 pillow>=10.0
 numpy>=1.26
+vercel-blob==0.6.0
+vercel-headers>=0.7.2,<1

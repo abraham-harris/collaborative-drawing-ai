@@ -4,3 +4,5 @@ numpy>=1.26
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.14.1+cpu
 torchvision==0.29.1+cpu
+vercel-blob==0.6.0
+vercel-headers>=0.7.2,<1

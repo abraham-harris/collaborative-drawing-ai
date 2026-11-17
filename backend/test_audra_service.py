@@ -24,13 +24,13 @@ class CheckpointTests(unittest.TestCase):
                     "AUDRA_CHECKPOINT_BLOB_URL": "https://example.private.blob.vercel-storage.com/model.ckpt",
                     "BLOB_READ_WRITE_TOKEN": "test-token",
                 }),
-                patch.object(audra_service, "urlopen", return_value=io.BytesIO(content)) as download,
+                patch.object(audra_service, "_stream_checkpoint", return_value=io.BytesIO(content)) as download,
             ):
                 path = audra_service._checkpoint_path()
                 self.assertEqual(path.read_bytes(), content)
                 self.assertEqual(audra_service._checkpoint_path(), path)
                 self.assertEqual(download.call_count, 1)
-                self.assertEqual(download.call_args.args[0].get_header("Authorization"), "Bearer test-token")
+                download.assert_called_once_with("model.ckpt")
 
 
 if __name__ == "__main__":

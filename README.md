@@ -81,9 +81,11 @@ options and platform limits.
 The checkpoint stays out of Git. Create a **private** Vercel Blob store linked
 to the project and upload the local file with `vercel blob put
 AuDrA/AuDrA_trained.ckpt --access private`. Copy the returned private blob URL
-into the Preview environment variable `AUDRA_CHECKPOINT_BLOB_URL`. Make sure
-`BLOB_READ_WRITE_TOKEN` for that store is also available to Preview functions.
-The server verifies the checkpoint's SHA-256 before loading it. For older Vercel
+into the Preview environment variable `AUDRA_CHECKPOINT_BLOB_URL`. The linked
+store must provide `BLOB_STORE_ID` to Preview functions; the Python Blob client
+uses the function's OIDC token to read from that store. A read-write token remains
+an option for local development outside Vercel. The server verifies the
+checkpoint's SHA-256 before loading it. For older Vercel
 projects, set `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` in the Preview environment to
 opt into Large Functions. A branch push produces a preview URL for live testing
 without changing the production site. The first score on a cold function will
