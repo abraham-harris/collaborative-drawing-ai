@@ -20,6 +20,13 @@ from torchvision.models import resnet18
 
 HERE = Path(__file__).resolve().parent
 IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+TRANSFORM = transforms.Compose(
+    [
+        transforms.Resize(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.1612] * 3, [0.4075] * 3),
+    ]
+)
 
 
 def load_model(checkpoint_path: Path) -> nn.Module:
@@ -50,16 +57,18 @@ def load_model(checkpoint_path: Path) -> nn.Module:
 
 def score_image(image: Image.Image, model: nn.Module) -> float:
     """Score one PIL image using the same preprocessing as the batch CLI."""
-    transform = transforms.Compose(
-        [
-            transforms.Resize(224),
-            transforms.ToTensor(),
-            transforms.Normalize([0.1612] * 3, [0.4075] * 3),
-        ]
-    )
-    prepared = transform(ImageOps.invert(image.convert("RGB"))).unsqueeze(0)
+    prepared = TRANSFORM(ImageOps.invert(image.convert("RGB"))).unsqueeze(0)
     with torch.inference_mode():
         return model(prepared).item()
+
+
+def score_batch(images: list[Image.Image], model: nn.Module) -> list[float]:
+    """Score several same-size images in one forward pass (same results as score_image)."""
+    if not images:
+        return []
+    prepared = torch.stack([TRANSFORM(ImageOps.invert(image.convert("RGB"))) for image in images])
+    with torch.inference_mode():
+        return model(prepared).flatten().tolist()
 
 
 def score_images(input_dir: Path, checkpoint_path: Path) -> list[tuple[str, float]]:

@@ -148,3 +148,34 @@ def simplify(points: list[Point], epsilon: float) -> list[Point]:
             stack.append((lo, best_i))
             stack.append((best_i, hi))
     return [p for p, k in zip(points, keep) if k]
+
+
+def ink_length(strokes: list[Stroke]) -> float:
+    """Total length of line (px) in a set of strokes: how much "ink" they use."""
+    return sum(s.length for s in strokes)
+
+
+def trim_to_length(lines: list[list[Point]], budget: float) -> list[list[Point]]:
+    """Keep polylines in drawing order until `budget` px of line is used, cutting the
+    last one exactly at the limit. (Adapted from trim_strokes on the dueling_artists branch.)"""
+    kept: list[list[Point]] = []
+    remaining = budget
+    for line in lines:
+        if remaining <= 0:
+            break
+        if not line:
+            continue
+        points = [line[0]]
+        for point in line[1:]:
+            length = dist(points[-1], point)
+            if length > remaining:
+                f = remaining / length
+                points.append((points[-1][0] + (point[0] - points[-1][0]) * f,
+                               points[-1][1] + (point[1] - points[-1][1]) * f))
+                remaining = 0
+                break
+            points.append(point)
+            remaining -= length
+        if len(points) > 1:
+            kept.append(points)
+    return kept

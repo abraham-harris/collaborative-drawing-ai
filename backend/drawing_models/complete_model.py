@@ -21,8 +21,8 @@ CANDIDATES = 6
 def start_in_open_space(model: sketch_rnn.SketchRNN, ctx: DrawingContext,
                         nrng: np.random.Generator) -> list[list[Point]] | None:
     """Blank canvas: draw a whole subject in the open."""
-    sketch = next((s for s in (model.draw(None, ctx.temperature, nrng) for _ in range(CANDIDATES))
-                   if s.strokes), None)
+    sketches = model.generate_batch(model.prime(None), [ctx.temperature] * CANDIDATES, nrng)
+    sketch = next((s for s in sketches if s.strokes), None)
     return place_object(ctx, sketch.strokes) if sketch else None
 
 
@@ -34,8 +34,7 @@ def finish(model: sketch_rnn.SketchRNN, lines: list[list[Point]], k: float, ctx:
     cursor = model.prime([[(x / k, y / k) for x, y in line] for line in lines])
     for temperature in (ctx.temperature, ctx.temperature + 0.15, ctx.temperature + 0.3):
         best = None
-        for _ in range(CANDIDATES):
-            sk = model.generate(cursor, temperature, nrng)
+        for sk in model.generate_batch(cursor, [temperature] * CANDIDATES, nrng):
             if not sk.strokes:
                 continue
             new = [[(origin[0] + x * k, origin[1] + y * k) for x, y in s] for s in sk.strokes]

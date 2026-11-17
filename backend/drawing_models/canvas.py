@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import random
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw
 
@@ -20,6 +22,8 @@ AI_COLOR = "#1971c2"
 AI_DEFAULT_SIZE = 4.0
 
 Polyline = list[Point]
+# Scores a batch of canvas images for creativity (AuDrA); one float per image.
+Scorer = Callable[[list[Image.Image]], list[float]]
 
 
 def ink_mask(image: Image.Image) -> Image.Image:
@@ -36,7 +40,8 @@ class DrawingContext:
 
     width: int
     height: int
-    # The human's strokes from this turn (vectors).
+    # The drawing so far as vectors: earlier turns' accepted strokes (human and AI)
+    # followed by the human's strokes from this turn.
     strokes: list[Stroke]
     # Quick Draw category the AI should draw, e.g. "cat".
     subject: str
@@ -45,20 +50,33 @@ class DrawingContext:
     cell: int
     # Bounding box of all ink on the canvas, or None if it is blank.
     ink_box: tuple[float, float, float, float] | None
+    # The canvas before the AI's turn, and its ink mask (see `render`).
+    image: Image.Image | None = None
+    mask: Image.Image | None = None
     temperature: float = 0.25
+    # Most px of line the AI may draw this turn (None = unlimited).
+    ink_budget: float | None = None
+    # How many alternatives Greedy generates, and the subjects it may spread them across.
+    iterations: int = 10
+    subjects: list[str] = field(default_factory=list)
+    # Creativity scorer for models that rank candidates (None if unavailable).
+    scorer: Scorer | None = None
+    # Details a model wants to report back to the UI's console (JSON-serializable).
+    report: dict[str, Any] = field(default_factory=dict)
     rng: random.Random = field(default_factory=random.Random)
     _table: list[list[int]] | None = field(default=None, repr=False)
 
     @classmethod
     def build(cls, image: Image.Image, strokes: list[Stroke], subject: str,
-              temperature: float = 0.25, cell: int = 10, rng: random.Random | None = None) -> "DrawingContext":
+              temperature: float = 0.25, cell: int = 10, rng: random.Random | None = None,
+              **options: Any) -> "DrawingContext":
         w, h = image.size
         mask = ink_mask(image)
         gw, gh = -(-w // cell), -(-h // cell)
         px = mask.resize((gw, gh), Image.Resampling.BOX).load()
         occupancy = [[px[x, y] > 0 for x in range(gw)] for y in range(gh)]
-        return cls(w, h, strokes, subject, occupancy, cell, mask.getbbox(), temperature,
-                   rng or random.Random())
+        return cls(w, h, strokes, subject, occupancy, cell, mask.getbbox(), image=image, mask=mask,
+                   temperature=temperature, rng=rng or random.Random(), **options)
 
     # --- queries -----------------------------------------------------------------
 
@@ -182,24 +200,27 @@ def place_object(ctx: DrawingContext, strokes: list[Polyline], near: Point | Non
     return fit_into(strokes, x, y, s, mirror=ctx.rng.random() < 0.5)
 
 
-def render(image: Image.Image, strokes: list[Stroke]) -> Image.Image:
+def render(image: Image.Image, strokes: list[Stroke], mask: Image.Image | None = None,
+           supersample: int = SUPERSAMPLE) -> Image.Image:
     """Draw AI strokes onto the canvas WITHOUT changing any existing ink.
 
     Strokes are painted on a transparent layer and composited over the canvas,
     then every pixel that was already inked is pasted back unchanged. So the AI
-    can only add; its lines appear to pass behind existing ones.
+    can only add; its lines appear to pass behind existing ones. Pass the
+    canvas's `ink_mask` as `mask` when rendering many candidates on one canvas.
+    `supersample` 1 skips anti-aliasing (faster; fine for scoring candidates).
     """
     base = image.convert("RGBA")
     if not strokes:
         return base.convert("RGB")
 
     w, h = base.size
-    layer = Image.new("RGBA", (w * SUPERSAMPLE, h * SUPERSAMPLE), (0, 0, 0, 0))
+    layer = Image.new("RGBA", (w * supersample, h * supersample), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     for s in strokes:
         rgba = hex_to_rgb(s.color) + (round(255 * max(0.0, min(1.0, s.opacity))),)
-        width = max(1, round(s.size * SUPERSAMPLE))
-        pts = [(x * SUPERSAMPLE, y * SUPERSAMPLE) for x, y in s.points]
+        width = max(1, round(s.size * supersample))
+        pts = [(x * supersample, y * supersample) for x, y in s.points]
         if len(pts) > 1:
             draw.line(pts, fill=rgba, width=width, joint="curve")
         if not s.closed:  # round end caps
@@ -208,9 +229,10 @@ def render(image: Image.Image, strokes: list[Stroke]) -> Image.Image:
                 draw.ellipse((x - r, y - r, x + r, y + r), fill=rgba)
 
     # Downsample in premultiplied alpha so edges don't pick up dark fringes.
-    layer = layer.convert("RGBa").resize((w, h), Image.Resampling.LANCZOS).convert("RGBA")
+    if supersample != 1:
+        layer = layer.convert("RGBa").resize((w, h), Image.Resampling.LANCZOS).convert("RGBA")
     combined = Image.alpha_composite(base, layer)
-    combined.paste(base, mask=ink_mask(base))
+    combined.paste(base, mask=mask if mask is not None else ink_mask(base))
     return combined.convert("RGB")
 
 

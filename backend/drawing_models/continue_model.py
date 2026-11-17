@@ -42,9 +42,10 @@ def _extend(model: sketch_rnn.SketchRNN, lines: list[list[Point]], k: float, ctx
     target = max(target_length, 30.0)
     for temperature in (ctx.temperature, ctx.temperature + 0.2):
         best = None
-        for _ in range(CANDIDATES):
-            sk = model.generate(cursor, temperature, nrng, max_steps=MAX_STEPS, stop_at_lift=True,
-                                min_length=min(FORCED_FRACTION * target_length, MAX_FORCED) / k)
+        sketches = model.generate_batch(cursor, [temperature] * CANDIDATES, nrng, max_steps=MAX_STEPS,
+                                        stop_at_lift=True,
+                                        min_length=min(FORCED_FRACTION * target_length, MAX_FORCED) / k)
+        for sk in sketches:
             if not sk.strokes:
                 continue
             line = [(origin[0] + x * k, origin[1] + y * k) for x, y in sk.strokes[0]]

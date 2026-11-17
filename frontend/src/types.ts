@@ -28,12 +28,14 @@ export interface DrawAction {
 }
 
 /** Which drawing model the AI uses (keys of MODELS in backend/drawing_models). */
-export type AIMode = 'complete' | 'continue';
+export type AIMode = 'complete' | 'continue' | 'greedy';
 
 /** Body POSTed to the Python server when the human clicks Submit. */
 export interface SubmitPayload {
   /** 1-based index of the current turn. */
   turn: number;
+  /** How many turns this game has. */
+  totalTurns: number;
   width: number;
   height: number;
   /** The full current canvas as a PNG data URL ("data:image/png;base64,..."). */
@@ -44,6 +46,8 @@ export interface SubmitPayload {
   contextActions: DrawAction[];
   /** Which drawing mode both candidates should use. */
   mode: AIMode;
+  /** How many candidates Greedy generates. */
+  greedyIterations: number;
 }
 
 export interface AICandidate {
@@ -54,6 +58,46 @@ export interface AICandidate {
   aiActions: DrawAction[];
 }
 
-export interface AIResponse { candidates: [AICandidate, AICandidate] }
+/** Two candidates to choose between, or (Greedy) one the AI already chose. */
+export interface AIResponse {
+  candidates: [AICandidate, AICandidate] | [AICandidate];
+  report?: TurnReport;
+}
+
+/** One of Greedy's candidates (subjects are hidden, as in a duel). */
+export interface GreedyCandidate {
+  strategy: 'complete' | 'continue';
+  /** Index (in the drawing so far) of the stroke a "continue" candidate extended. */
+  extends: number | null;
+  temperature: number;
+  /** px of line drawn. */
+  ink: number;
+  /** AuDrA score of the whole drawing with this candidate added (null if unscored). */
+  score: number | null;
+}
+
+/** What happened during one AI turn (see backend/server.py and ai_model.py). Times are seconds. */
+export interface TurnReport {
+  turn: number;
+  totalTurns: number;
+  mode: AIMode;
+  /** px of line the human drew this turn, and the most the AI could use. */
+  humanInk?: number;
+  inkBudget?: number;
+  /** AuDrA score of the drawing before the AI's turn. */
+  before?: number;
+  /** Each returned drawing: its ink, and AuDrA scores for the whole drawing with it and its strokes alone. */
+  options?: { ink: number; strokes: number; after?: number; aiOnly?: number }[];
+  scoringError?: string;
+  greedy?: {
+    iterations: number;
+    candidates: GreedyCandidate[];
+    averageScore?: number | null;
+    chosenIndex?: number;
+    chosenScore?: number | null;
+    scoringError?: string;
+  };
+  timings: Partial<Record<'total' | 'model' | 'generate' | 'renderCandidates' | 'scoreCandidates' | 'render' | 'scoreDrawing', number>>;
+}
 
 export type Phase = 'human' | 'ai' | 'choose' | 'done';

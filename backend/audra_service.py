@@ -70,11 +70,36 @@ def _checkpoint_path() -> Path:
     return cached
 
 
+# More threads than this made batch scoring slower and less predictable on a
+# 12-thread laptop with other apps open (worst case 1.97 s -> 0.83 s at 6).
+MAX_TORCH_THREADS = 6
+
+
 @lru_cache(maxsize=1)
 def _model():
+    import torch
     from AuDrA.score import load_model
 
+    torch.set_num_threads(max(1, min(torch.get_num_threads(), MAX_TORCH_THREADS)))
     return load_model(_checkpoint_path())
+
+
+def warm() -> None:
+    """Import PyTorch and load the checkpoint now (~4 s), so the first scored turn is fast."""
+    _model()
+
+
+def score_drawings(images: list[Image.Image]) -> list[float]:
+    """Score same-size drawings in one batch; used to rank the AI's candidates."""
+    from flask import has_request_context, request
+
+    if has_request_context():
+        from vercel.headers import set_headers
+
+        set_headers(request.headers)
+    from AuDrA.score import score_batch
+
+    return score_batch(images, _model())
 
 
 def score_drawing(image: Image.Image) -> float:

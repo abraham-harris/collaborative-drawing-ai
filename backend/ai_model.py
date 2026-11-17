@@ -1,22 +1,40 @@
-"""Generate two limited-ink alternatives from the same canvas."""
+"""Generate the AI's turn from the canvas.
+
+- Complete / Continue (the dueling_artists design): two limited-ink alternatives
+  with distinct random subjects; the human chooses one to keep.
+- Greedy: the AI tries many alternatives limited to the ink the human drew this
+  turn and returns the one AuDrA rates most creative, so there's nothing to choose.
+
+`score_options` adds AuDrA scores for the console report.
+"""
 
 from __future__ import annotations
 
 import logging
+import os
 import random
+import time
 from typing import Any
 
 from PIL import Image
 
 from drawing_models import (DEFAULT_MODE, MODELS, SUBJECTS, DrawingContext, Stroke,
                             render, stroke_to_action, strokes_from_actions)
-from drawing_models.strokes import dist
+from drawing_models.canvas import Scorer
+from drawing_models.strokes import dist, ink_length
 
 log = logging.getLogger(__name__)
 
 
 INK_LIMIT = 300.0
 MAX_SUBJECT_ATTEMPTS = 6
+# Greedy: how many candidates it tries, and how many random subjects it spreads them across.
+DEFAULT_ITERATIONS = 10
+GREEDY_SUBJECTS = 3
+MIN_INK = 3.0  # px; below this the human effectively drew nothing
+# The models re-read the drawing every turn; keep only the most recent strokes so
+# long sessions (rounds are unlimited) stay fast.
+MAX_CONTEXT_STROKES = 40
 
 
 def trim_strokes(strokes: list[Stroke], limit: float = INK_LIMIT) -> list[Stroke]:
@@ -47,20 +65,48 @@ def trim_strokes(strokes: list[Stroke], limit: float = INK_LIMIT) -> list[Stroke
     return kept
 
 
+def _audra_scorer() -> Scorer | None:
+    """AuDrA's batch scorer, or None if it's turned off (AUDRA_SCORE_TURNS=0) or not installed."""
+    if os.environ.get("AUDRA_SCORE_TURNS", "1") == "0":
+        return None
+    try:
+        import audra_service
+    except ImportError:
+        return None
+    return audra_service.score_drawings
+
+
 def generate_drawing(
     image: Image.Image,
     actions: list[dict[str, Any]],
     context_actions: list[dict[str, Any]] | None = None,
     mode: str = DEFAULT_MODE,
     rng: random.Random | None = None,
+    *,
+    iterations: int = DEFAULT_ITERATIONS,
+    scorer: Scorer | None | str = "audra",
+    report: dict[str, Any] | None = None,
 ) -> list[tuple[Image.Image, str, list[dict[str, Any]], str]]:
-    """Return two candidates with distinct random subjects, both in the chosen mode."""
+    """Return two candidates with distinct random subjects, both in the chosen mode.
+
+    Greedy returns a single candidate instead (see `_greedy`). `iterations` and
+    `scorer` only affect Greedy. Pass a `report` dict to collect ink and timings.
+    """
     if mode not in MODELS:
         raise ValueError(f"Unknown mode {mode!r}; expected one of {sorted(MODELS)}")
     rng = rng or random.Random()
+    report = {} if report is None else report
+    timings = report.setdefault("timings", {})
+    report["humanInk"] = ink_length(strokes_from_actions(actions))
+    strokes = strokes_from_actions(context_actions if context_actions is not None else actions)
+    strokes = strokes[-MAX_CONTEXT_STROKES:]
+    if mode == "greedy":
+        return _greedy(image, strokes, rng, iterations, scorer, report)
+
+    report["inkBudget"] = INK_LIMIT
+    start = time.perf_counter()
     candidates = []
     errors = []
-    strokes = strokes_from_actions(context_actions if context_actions is not None else actions)
     for subject in rng.sample(SUBJECTS, min(MAX_SUBJECT_ATTEMPTS, len(SUBJECTS))):
         ctx = DrawingContext.build(image, strokes, subject,
                                    rng=random.Random(rng.getrandbits(64)))
@@ -73,11 +119,76 @@ def generate_drawing(
         limited = trim_strokes(ai_strokes)
         if limited:
             message = "The AI added to your drawing."
-            candidates.append((render(image, limited), message,
+            candidates.append((render(image, limited, ctx.mask), message,
                                [stroke_to_action(s) for s in limited], subject))
             if len(candidates) == 2:
+                timings["model"] = time.perf_counter() - start
                 return candidates
         else:
             errors.append(f"{subject}: drew nothing")
     log.warning("Could not make two AI choices: %s", "; ".join(errors))
     raise RuntimeError("The AI couldn't make two choices this turn")
+
+
+def _greedy(image: Image.Image, strokes: list[Stroke], rng: random.Random, iterations: int,
+            scorer: Scorer | None | str, report: dict[str, Any]):
+    """One candidate: the most creative of `iterations` tries, using only as much ink
+    as the human drew this turn. Subjects are random (and not reported), as in a duel."""
+    budget = report["humanInk"]
+    report["inkBudget"] = budget
+    if budget < MIN_INK:
+        return [(image.convert("RGB"), "You didn't draw anything this turn, so I have no ink to spend.", [], "")]
+    if scorer == "audra":
+        scorer = _audra_scorer()
+
+    subjects = rng.sample(SUBJECTS, GREEDY_SUBJECTS)
+    ctx = DrawingContext.build(image, strokes, subjects[0], rng=random.Random(rng.getrandbits(64)),
+                               ink_budget=budget, iterations=max(1, iterations), subjects=subjects,
+                               scorer=scorer, report=report)
+    t = time.perf_counter()
+    try:
+        ai_strokes, message = MODELS["greedy"](ctx)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("greedy model failed")
+        raise RuntimeError("The AI couldn't draw this turn") from exc
+    finally:
+        report["timings"]["model"] = time.perf_counter() - t
+    ai_strokes = trim_strokes(ai_strokes, budget)
+    if not ai_strokes:
+        raise RuntimeError("The AI couldn't draw this turn")
+
+    t = time.perf_counter()
+    result = render(image, ai_strokes, ctx.mask)
+    report["timings"]["render"] = time.perf_counter() - t
+    subject = report.pop("chosenSubject", subjects[0])  # internal only: subjects stay hidden
+    return [(result, message, [stroke_to_action(s) for s in ai_strokes], subject)]
+
+
+def score_options(image: Image.Image, options: list[tuple[Image.Image, list[dict[str, Any]]]],
+                  report: dict[str, Any], scorer: Scorer | None | str = "audra") -> None:
+    """Add AuDrA scores to `report` for the console, in one batch: the drawing before
+    this turn, then each option (the whole drawing with it, and its AI strokes alone).
+    Also records each option's ink. Never raises; failures go in report["scoringError"]."""
+    report["options"] = [{"ink": ink_length(strokes_from_actions(ai)), "strokes": len(ai)}
+                         for _, ai in options]
+    if scorer == "audra":
+        scorer = _audra_scorer()
+    if scorer is None:
+        report["scoringError"] = "creativity scorer unavailable"
+        return
+    blank = Image.new("RGB", image.size, "white")
+    images = ([image.convert("RGB")] + [result.convert("RGB") for result, _ in options]
+              + [render(blank, strokes_from_actions(ai)) for _, ai in options])
+    t = time.perf_counter()
+    try:
+        scores = [float(s) for s in scorer(images)]
+    except Exception:  # noqa: BLE001 -- a turn shouldn't fail because scoring did
+        log.exception("AuDrA scoring failed")
+        report["scoringError"] = "creativity scoring failed"
+        return
+    finally:
+        report.setdefault("timings", {})["scoreDrawing"] = time.perf_counter() - t
+    n = len(options)
+    report["before"] = scores[0]
+    for i, option in enumerate(report["options"]):
+        option["after"], option["aiOnly"] = scores[1 + i], scores[1 + n + i]

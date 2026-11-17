@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import complete_model, continue_model
+from . import complete_model, continue_model, greedy_model
 from .canvas import DrawingContext, render
 from .strokes import Stroke, stroke_to_action, strokes_from_actions
 from .subjects import RANDOM, SUBJECTS
@@ -25,6 +25,8 @@ ModelFn = Callable[[DrawingContext], tuple[list[Stroke], str]]
 MODELS: dict[str, ModelFn] = {
     "complete": complete_model.generate,
     "continue": continue_model.generate,
+    # Greedy ranks its own candidates with AuDrA; see ai_model._greedy.
+    "greedy": greedy_model.generate,
 }
 DEFAULT_MODE = "complete"
 

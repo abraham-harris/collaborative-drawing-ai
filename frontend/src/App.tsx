@@ -2,8 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { scoreDrawing, submitDrawing } from './api';
 import DrawingCanvas, { type DrawingCanvasHandle } from './components/DrawingCanvas';
 import ModeSelector from './components/ModeSelector';
+import TurnConsole, { type ConsoleEntry } from './components/TurnConsole';
 import Toolbar from './components/Toolbar';
-import { CANVAS_HEIGHT, CANVAS_WIDTH, DEFAULT_AI_MODE, INK_LIMIT } from './config';
+import {
+  CANVAS_HEIGHT, CANVAS_WIDTH, DEFAULT_AI_MODE, DEFAULT_GREEDY_ITERATIONS, DEFAULT_TURNS, INK_LIMIT,
+} from './config';
 import type { AICandidate, AIMode, BrushSettings, DrawAction, Phase } from './types';
 import './App.css';
 
@@ -18,7 +21,10 @@ export default function App() {
   const [remaining, setRemaining] = useState(INK_LIMIT);
   const [turn, setTurn] = useState(1);
   const [phase, setPhase] = useState<Phase>('human');
-  const [candidates, setCandidates] = useState<[AICandidate, AICandidate] | null>(null);
+  const [candidates, setCandidates] = useState<AICandidate[] | null>(null);
+  const [totalTurns, setTotalTurns] = useState(DEFAULT_TURNS);
+  const [greedyIterations, setGreedyIterations] = useState(DEFAULT_GREEDY_ITERATIONS);
+  const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
   const [aiMode, setAiMode] = useState<AIMode>(DEFAULT_AI_MODE);
@@ -40,33 +46,62 @@ export default function App() {
     setAiMessage(null);
     try {
       const response = await submitDrawing({
-        turn, width: CANVAS_WIDTH, height: CANVAS_HEIGHT, image, actions,
-        contextActions: [...acceptedActionsRef.current, ...actions], mode: aiMode,
+        turn, totalTurns, width: CANVAS_WIDTH, height: CANVAS_HEIGHT, image, actions,
+        contextActions: [...acceptedActionsRef.current, ...actions], mode: aiMode, greedyIterations,
       });
-      setCandidates(response.candidates);
-      setPhase('choose');
+      const { report } = response;
+      if (report) setConsoleEntries((entries) => [...entries, { report, kept: null }]);
+      if (response.candidates.length === 1) {
+        // Greedy already chose its drawing: keep it without asking.
+        await acceptCandidate(response.candidates[0], 0);
+      } else {
+        setCandidates(response.candidates);
+        setPhase('choose');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('human');
     }
-  }, [phase, turn, aiMode]);
+  // acceptCandidate only reads refs and state setters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, turn, totalTurns, aiMode, greedyIterations]);
 
-  const handleChoose = async (candidate: AICandidate) => {
+  /** Put a candidate on the canvas, remember its strokes, and move to the next turn (or finish). */
+  const acceptCandidate = async (candidate: AICandidate, index: number) => {
+    await canvasRef.current?.loadImage(candidate.image);
+    acceptedActionsRef.current = [
+      ...acceptedActionsRef.current, ...pendingActionsRef.current, ...candidate.aiActions,
+    ];
+    pendingActionsRef.current = [];
+    setAiMessage(candidate.message);
+    setCandidates(null);
+    setConsoleEntries((entries) => entries.map((e, i) => (i === entries.length - 1 ? { ...e, kept: index } : e)));
+    if (turn >= totalTurns) {
+      setPhase('done');
+    } else {
+      setTurn((value) => value + 1);
+      setPhase('human');
+    }
+  };
+
+  const handleChoose = async (candidate: AICandidate, index: number) => {
     if (phase !== 'choose') return;
     setPhase('ai');
     try {
-      await canvasRef.current?.loadImage(candidate.image);
-      acceptedActionsRef.current = [
-        ...acceptedActionsRef.current, ...pendingActionsRef.current, ...candidate.aiActions,
-      ];
-      pendingActionsRef.current = [];
-      setAiMessage(candidate.message);
-      setCandidates(null);
-      setTurn((value) => value + 1);
-      setPhase('human');
+      await acceptCandidate(candidate, index);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('choose');
+    }
+  };
+
+  // Raising the turn count after the last turn picks the game back up.
+  const handleTotalTurnsChange = (value: number) => {
+    setTotalTurns(value);
+    if (phase === 'done' && value > turn) {
+      setTurn((t) => t + 1);
+      setPhase('human');
+      setCreativityScore(null);
     }
   };
 
@@ -83,6 +118,7 @@ export default function App() {
     canvasRef.current?.reset();
     acceptedActionsRef.current = [];
     pendingActionsRef.current = [];
+    setConsoleEntries([]);
     setTurn(1);
     setPhase('human');
     setCandidates(null);
@@ -152,7 +188,7 @@ export default function App() {
       <header className="app-header">
         <h1>Co-Drawing with AI</h1>
         <div className="turn-info">
-          <span className="turn-badge">Round {turn}</span>
+          <span className="turn-badge">Turn {turn} / {totalTurns}</span>
           <span className={`status status-${phase}`} role="status">
             {phase === 'ai' && <span className="spinner" aria-hidden />}
             {status}
@@ -175,7 +211,10 @@ export default function App() {
         </div>
       </header>
 
-      <ModeSelector mode={aiMode} onChange={setAiMode} disabled={phase !== 'human'} />
+      <ModeSelector mode={aiMode} onChange={setAiMode} disabled={phase !== 'human'}
+        totalTurns={totalTurns} minTurns={turn} onTotalTurnsChange={handleTotalTurnsChange}
+        iterations={greedyIterations} onIterationsChange={setGreedyIterations}
+        settingsDisabled={phase === 'ai'} />
 
       {error && <div className="banner banner-error" role="alert">
         <strong>Couldn't continue:</strong> {error}
@@ -196,7 +235,7 @@ export default function App() {
           <div className="candidate-grid">
             {candidates.map((candidate, index) => (
               <button key={index} type="button" className="candidate"
-                onClick={() => void handleChoose(candidate)}>
+                onClick={() => void handleChoose(candidate, index)}>
                 <img src={candidate.image} alt={`AI drawing option ${index + 1}`} />
                 <span>Keep option {index + 1}</span>
               </button>
@@ -219,6 +258,8 @@ export default function App() {
             onHistoryChange={setHistory} onInkChange={setRemaining} />
         </div>
       </main>
+
+      <TurnConsole entries={consoleEntries} onClear={() => setConsoleEntries([])} />
 
       <footer className="credits">
         AI drawings by{' '}

@@ -11,7 +11,10 @@ import base64
 import binascii
 import io
 import math
+import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -19,13 +22,14 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ai_model import generate_drawing
+from ai_model import DEFAULT_ITERATIONS, generate_drawing, score_options
 from drawing_models import DEFAULT_MODE, MODELS, RANDOM, SUBJECTS
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB
 MAX_SCORE_REQUEST_BYTES = 4 * 1024 * 1024
 MAX_SCORE_PIXELS = 2_000_000
+MAX_ITERATIONS = 30
 
 
 def decode_data_url(data_url: str) -> Image.Image:
@@ -67,20 +71,32 @@ def turn():
         return jsonify({"error": f"Unknown mode {mode!r}; expected one of {sorted(MODELS)}"}), 400
 
     try:
+        iterations = max(1, min(MAX_ITERATIONS, int(payload.get("greedyIterations", DEFAULT_ITERATIONS))))
+    except (TypeError, ValueError):
+        return jsonify({"error": "greedyIterations must be a whole number"}), 400
+
+    # Ink, AuDrA scores, and timings for the page's console.
+    start = time.perf_counter()
+    report = {"turn": payload.get("turn"), "totalTurns": payload.get("totalTurns"), "mode": mode}
+    try:
         results = generate_drawing(
             image=image,
             actions=payload.get("actions", []),
             context_actions=payload.get("contextActions"),
             mode=mode,
+            iterations=iterations,
+            report=report,
         )
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 502
+    score_options(image, [(result, ai_actions) for result, _message, ai_actions, _subject in results], report)
+    report.setdefault("timings", {})["total"] = time.perf_counter() - start
 
     return jsonify({"candidates": [
         {"image": encode_data_url(result), "mode": mode,
          "aiActions": ai_actions, "message": message}
         for result, message, ai_actions, _subject in results
-    ]})
+    ], "report": report})
 
 
 @app.post("/api/score")
@@ -120,5 +136,19 @@ def score():
     return response
 
 
+def _warm_audra() -> None:
+    try:
+        from audra_service import warm
+
+        warm()
+        app.logger.info("AuDrA creativity model loaded")
+    except Exception:  # noqa: BLE001 -- scoring is optional; turns report it as unavailable
+        app.logger.warning("AuDrA creativity model unavailable; turns will be unscored", exc_info=True)
+
+
 if __name__ == "__main__":
+    # Load PyTorch + AuDrA (~4-6 s) in the background now instead of during the first turn.
+    # With debug=True the reloader runs this file twice; only warm the process that serves.
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        threading.Thread(target=_warm_audra, daemon=True).start()
     app.run(host="127.0.0.1", port=5000, debug=True)

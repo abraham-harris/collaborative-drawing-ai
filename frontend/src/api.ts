@@ -13,11 +13,12 @@ export async function submitDrawing(payload: SubmitPayload): Promise<AIResponse>
     throw new Error(`AI server responded ${res.status}${detail ? `: ${detail}` : ''}`);
   }
   const data = (await res.json()) as AIResponse;
-  if (!Array.isArray(data.candidates) || data.candidates.length !== 2 ||
+  // Two candidates to choose between, or one that Greedy already chose.
+  if (!Array.isArray(data.candidates) || data.candidates.length < 1 || data.candidates.length > 2 ||
       data.candidates.some((candidate) => typeof candidate.image !== 'string' ||
         !candidate.image.startsWith('data:image/png;base64,') ||
         !Array.isArray(candidate.aiActions))) {
-    throw new Error('AI server response is missing two valid candidates');
+    throw new Error('AI server response is missing valid candidates');
   }
   return data;
 }

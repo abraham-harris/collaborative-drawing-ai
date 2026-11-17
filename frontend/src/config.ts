@@ -3,6 +3,14 @@ import type { AIMode } from './types';
 /** Path length available to each participant on each turn, in canvas pixels. */
 export const INK_LIMIT = 300;
 
+/** Default and maximum number of turns in a game (editable on the page; "Finish drawing" ends early). */
+export const DEFAULT_TURNS = 5;
+export const MAX_TURNS = 20;
+
+/** How many candidates Greedy generates and ranks by creativity (editable on the page). */
+export const DEFAULT_GREEDY_ITERATIONS = 10;
+export const MAX_GREEDY_ITERATIONS = 30;
+
 /** The AI drawing models the user can choose between (see backend/drawing_models). */
 export const AI_MODES: { id: AIMode; label: string; description: string }[] = [
   {
@@ -14,6 +22,12 @@ export const AI_MODES: { id: AIMode; label: string; description: string }[] = [
     id: 'continue',
     label: 'Continue',
     description: 'Extends the ends of your lines (SketchRNN).',
+  },
+  {
+    id: 'greedy',
+    label: 'Greedy',
+    description:
+      'Uses only as much ink as you drew. Tries several drawings and keeps the one AuDrA rates most creative.',
   },
 ];
 export const DEFAULT_AI_MODE: AIMode = 'complete';

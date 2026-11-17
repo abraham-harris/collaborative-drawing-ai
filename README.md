@@ -1,6 +1,6 @@
 # collaborative-drawing-ai
 
-A human and SketchRNN take turns adding small amounts of ink to one canvas. Each AI turn offers two drawings with different randomly selected subjects; the human chooses one to keep and decides when the drawing is finished.
+A human and SketchRNN take turns adding small amounts of ink to one canvas. Each AI turn offers two drawings with different randomly selected subjects; the human chooses one to keep and decides when the drawing is finished. In **Greedy** mode the AI instead tries many drawings, using only as much ink as the human just drew, and keeps the one AuDrA rates most creative. A console under the canvas reports every turn's ink, AuDrA scores, and timings.
 
 ```
 frontend/   React + TypeScript (Vite) drawing app
@@ -95,7 +95,9 @@ take longer because it downloads and loads the checkpoint.
 
 | What | File |
 |---|---|
-| Ink limit, canvas size, AI modes | `frontend/src/config.ts` |
+| Ink limit, canvas size, AI modes, default turns and Greedy candidates | `frontend/src/config.ts` |
+| Console under the canvas (per-turn report) | `frontend/src/components/TurnConsole.tsx` |
+| Tests (no network or checkpoint needed) | `backend/test_ai_model.py`, `backend/test_greedy.py`, `backend/test_score.py`, `frontend/tests/` |
 | AI entry point: picks subjects, limits and renders strokes | `backend/ai_model.py` → `generate_drawing()` |
 | The drawing models | `backend/drawing_models/` |
 | HTTP endpoint `POST /api/turn` | `backend/server.py` |
@@ -107,19 +109,21 @@ take longer because it downloads and loads the checkpoint.
 `POST /api/turn` request:
 ```json
 {
-  "turn": 1, "width": 800, "height": 600,
+  "turn": 1, "totalTurns": 5, "width": 800, "height": 600,
   "image": "data:image/png;base64,...",
   "actions": [{ "tool": "brush", "color": "#1e1e1e", "size": 8, "opacity": 1,
                 "filled": false, "points": [{ "x": 10, "y": 20 }, ...] }],
   "contextActions": [ ...accepted strokes and this turn's actions ],
-  "mode": "complete"
+  "mode": "complete", "greedyIterations": 10
 }
 ```
 `image` holds the whole canvas. `actions` lists the human's pen strokes this turn; `contextActions` includes accepted strokes from earlier rounds for model context.
 
-`mode` is `"complete"` (the default) or `"continue"`. The server picks two different subjects.
+`mode` is `"complete"` (the default), `"continue"`, or `"greedy"`. For Complete and Continue the server picks two different subjects. `greedyIterations` (1–30, default 10) is how many candidates Greedy tries.
 
-Response: `{ "candidates": [{ "image": "data:image/png;base64,...", "mode": "complete", "aiActions": [ ... ], "message": "..." }, { ... }] }`
+Response: `{ "candidates": [{ "image": "data:image/png;base64,...", "mode": "complete", "aiActions": [ ... ], "message": "..." }, { ... }], "report": { ... } }`. Greedy returns a single candidate, which the page keeps without asking.
+
+`report` is shown in the page's console: `humanInk` and `inkBudget` (px of line), each returned option's `ink` with AuDrA scores for the whole drawing with it (`after`) and its AI strokes alone (`aiOnly`), the score `before` the turn, Greedy's candidates and choice (`greedy`), and step `timings` in seconds. Subjects are never included. If AuDrA isn't set up, the scores are missing and `scoringError` says why. See `TurnReport` in `frontend/src/types.ts`.
 
 `POST /api/score` request: `{ "image": "data:image/png;base64,..." }`
 
@@ -128,12 +132,13 @@ clamped to 0–1 and should not be interpreted as a general creativity score.
 
 ## AI drawing models
 
-The **AI partner** switch selects Complete or Continue for both AI choices. Subjects are drawn randomly from 95 Quick, Draw! categories.
+The **AI partner** switch selects Complete or Continue for both AI choices, or Greedy. **Turns** sets how long the game lasts; **Finish drawing** still ends it early, and raising Turns after the last turn picks the game back up. Subjects are drawn randomly from 95 Quick, Draw! categories.
 
 | Mode | File | What it does |
 |---|---|---|
 | **Complete** | `complete_model.py` | SketchRNN treats the human's strokes as the start of a subject and adds separate strokes. |
 | **Continue** | `continue_model.py` | SketchRNN extends the ends of the human's lines. |
+| **Greedy** | `greedy_model.py` (run by `ai_model._greedy`) | The AI may draw only as many px of line as the human drew this turn. It generates **Candidates** (default 10) alternatives in one batch, spread across 3 random subjects: half add new strokes, half extend one of the human's strokes, at temperatures from cautious (0.2) to adventurous (0.9). AuDrA scores each one as part of the whole drawing, and the highest-scoring one is kept. |
 
 Where the drawings come from:
 
@@ -144,3 +149,24 @@ The 95 subjects are the Quick Draw categories that have a pretrained SketchRNN m
 The AI only *adds* strokes, and it draws them in its own color (`AI_COLOR` in `canvas.py`). `canvas.render` pastes every already-inked pixel back on top, so the AI can never erase or paint over existing work.
 
 To add a mode, write a `generate(ctx) -> (strokes, message)` function and register it in `MODELS` in `drawing_models/__init__.py` and `AI_MODES` in `frontend/src/config.ts`.
+
+### Console and creativity scores
+
+Every AI turn adds a block to the console under the canvas: ink used, AuDrA scores, and how long each step took. In a duel, both options are scored, but the scores are only shown after the player chooses so they can't influence the choice. Scoring during turns needs PyTorch in the backend's environment (`pip install -r requirements.txt` from the repository root) and the AuDrA checkpoint described in "Rate drawings with AuDrA". Without them, turns still work and the console says scoring is unavailable; Greedy then keeps its first candidate. `python server.py` loads AuDrA in the background at startup (about 5 s) so the first turn isn't slowed down. Set `AUDRA_SCORE_TURNS=0` to skip scoring during turns, for example on a deployment where loading PyTorch would slow every cold start.
+
+### Speed
+
+An AI turn should take under 5 s. Measured on a 12-thread Windows laptop with other apps open, including AuDrA scoring:
+
+| Mode | Turn time |
+|---|---|
+| Complete / Continue duel (2 options) | about 1–2 s |
+| Greedy, 10 candidates | 1.5–2.5 s once its subjects are downloaded; up to ~4.6 s when all 3 random subjects are new |
+
+What made it faster:
+- SketchRNN samples all candidates as one batch instead of one at a time. The LSTM weights are stored transposed, because this numpy/OpenBLAS build multiplies a small batch by a wide matrix about 10x faster that way (10 drawings: 1.08 s → 0.20 s).
+- Decoded SketchRNN weights are cached as `.npz` next to the downloaded JSON (load 0.8 s → 0.04 s), and Greedy downloads its subjects in parallel.
+- Greedy renders candidates for scoring without anti-aliasing (0.55 s → 0.06 s for 10; scores change by ≤ 0.005), and all AuDrA scoring is batched.
+- AuDrA is loaded at server start, and PyTorch is capped at 6 threads, which made scoring steadier when other apps were busy.
+- The models re-read only the 40 most recent strokes, so long games stay fast.
+- Tried and rejected: scoring candidates at lower resolution. At 160 px, AuDrA picked the same winner only 3 times out of 12.
