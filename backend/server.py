@@ -66,26 +66,21 @@ def turn():
     if mode not in MODELS:
         return jsonify({"error": f"Unknown mode {mode!r}; expected one of {sorted(MODELS)}"}), 400
 
-    subject = payload.get("subject", RANDOM)
-    if subject != RANDOM and subject not in SUBJECTS:
-        return jsonify({"error": f"Unknown subject {subject!r}; see GET /api/subjects"}), 400
-
     try:
-        result, message, ai_actions, subject = generate_drawing(
+        results = generate_drawing(
             image=image,
             actions=payload.get("actions", []),
-            turn=int(payload.get("turn", 1)),
-            total_turns=int(payload.get("totalTurns", 1)),
+            context_actions=payload.get("contextActions"),
             mode=mode,
-            subject=subject,
         )
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 502
 
-    response = {"image": encode_data_url(result), "mode": mode, "subject": subject, "aiActions": ai_actions}
-    if message:
-        response["message"] = message
-    return jsonify(response)
+    return jsonify({"candidates": [
+        {"image": encode_data_url(result), "mode": mode,
+         "aiActions": ai_actions, "message": message}
+        for result, message, ai_actions, _subject in results
+    ]})
 
 
 @app.post("/api/score")

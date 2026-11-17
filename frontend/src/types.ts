@@ -1,4 +1,4 @@
-export type Tool = 'brush' | 'eraser' | 'line' | 'rectangle' | 'ellipse' | 'fill';
+export type Tool = 'brush';
 
 export interface Point {
   x: number;
@@ -11,15 +11,12 @@ export interface BrushSettings {
   size: number;
   /** 0..1 */
   opacity: number;
-  /** Fill rectangles/ellipses instead of outlining them. */
   filled: boolean;
 }
 
 /**
  * One thing the human did on the canvas, in canvas pixel coordinates.
- * - brush/eraser: `points` is the full stroke path
- * - line/rectangle/ellipse: `points` is [start, end]
- * - fill: `points` is [seed point]
+ * `points` is the full pen stroke path.
  */
 export interface DrawAction {
   tool: Tool;
@@ -37,31 +34,26 @@ export type AIMode = 'complete' | 'continue';
 export interface SubmitPayload {
   /** 1-based index of the current turn. */
   turn: number;
-  totalTurns: number;
   width: number;
   height: number;
   /** The full current canvas as a PNG data URL ("data:image/png;base64,..."). */
   image: string;
   /** Vector record of what the human drew during this turn. */
   actions: DrawAction[];
-  /** Which drawing model should respond. */
+  /** Accepted human and AI strokes from earlier rounds, plus this turn. */
+  contextActions: DrawAction[];
+  /** Which drawing mode both candidates should use. */
   mode: AIMode;
-  /** What the AI should draw: one of SUBJECTS, or 'random'. */
-  subject: string;
 }
 
-/** Response from the Python server. */
-export interface AIResponse {
-  /** The combined human + AI drawing as a PNG data URL. Replaces the canvas. */
+export interface AICandidate {
+  /** The combined human + AI drawing as a PNG data URL. */
   image: string;
-  /** Optional text from the AI (e.g. what it added). */
-  message?: string;
-  /** The model that responded. */
-  mode?: AIMode;
-  /** The subject the AI drew (resolved if 'random' was requested). */
-  subject?: string;
-  /** The strokes the AI added, in the same format as the human's actions. */
-  aiActions?: DrawAction[];
+  message: string;
+  mode: AIMode;
+  aiActions: DrawAction[];
 }
 
-export type Phase = 'human' | 'ai' | 'done';
+export interface AIResponse { candidates: [AICandidate, AICandidate] }
+
+export type Phase = 'human' | 'ai' | 'choose' | 'done';

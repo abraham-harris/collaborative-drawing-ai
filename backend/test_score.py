@@ -47,13 +47,17 @@ class ScoreEndpointTests(unittest.TestCase):
 
     def test_existing_turn_endpoint_still_responds(self):
         result = Image.new("RGB", (8, 8), "white")
-        with patch("server.generate_drawing", return_value=(result, "", [], "cat")):
+        with patch("server.generate_drawing", return_value=[
+            (result, "", [], "cat"), (result, "", [], "dog")
+        ]):
             response = self.client.post(
                 "/api/turn",
-                json={"image": self.data_url, "mode": "complete", "subject": "cat"},
+                json={"image": self.data_url, "mode": "complete"},
             )
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json["image"].startswith("data:image/png;base64,"))
+        self.assertEqual(len(response.json["candidates"]), 2)
+        self.assertTrue(response.json["candidates"][0]["image"].startswith("data:image/png;base64,"))
+        self.assertTrue(all("subject" not in candidate for candidate in response.json["candidates"]))
 
 
 if __name__ == "__main__":

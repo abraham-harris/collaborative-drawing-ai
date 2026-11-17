@@ -28,13 +28,7 @@ MODELS: dict[str, ModelFn] = {
 }
 DEFAULT_MODE = "complete"
 
-# If a model draws nothing (or fails), try these next so the AI always takes its turn.
-FALLBACKS: dict[str, list[str]] = {
-    "complete": ["continue"],
-    "continue": ["complete"],
-}
-
 __all__ = [
-    "MODELS", "DEFAULT_MODE", "FALLBACKS", "SUBJECTS", "RANDOM", "DrawingContext", "Stroke",
+    "MODELS", "DEFAULT_MODE", "SUBJECTS", "RANDOM", "DrawingContext", "Stroke",
     "render", "stroke_to_action", "strokes_from_actions",
 ]

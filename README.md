@@ -1,6 +1,6 @@
 # collaborative-drawing-ai
 
-A human (or another AI) and an AI model take turns on one canvas. The human draws and clicks **Submit to AI**. The drawing goes to a Python server, and the image the AI sends back replaces the canvas.
+A human and SketchRNN take turns adding small amounts of ink to one canvas. Each AI turn offers two drawings with different randomly selected subjects; the human chooses one to keep and decides when the drawing is finished.
 
 ```
 frontend/   React + TypeScript (Vite) drawing app
@@ -95,9 +95,8 @@ take longer because it downloads and loads the checkpoint.
 
 | What | File |
 |---|---|
-| Number of turns (`NUM_TURNS`, default 1), canvas size | `frontend/src/config.ts` |
-| AI mode list shown on the page (`AI_MODES`, `DEFAULT_AI_MODE`) | `frontend/src/config.ts` |
-| AI entry point: picks the model, renders its strokes | `backend/ai_model.py` → `generate_drawing()` |
+| Ink limit, canvas size, AI modes | `frontend/src/config.ts` |
+| AI entry point: picks subjects, limits and renders strokes | `backend/ai_model.py` → `generate_drawing()` |
 | The drawing models | `backend/drawing_models/` |
 | HTTP endpoint `POST /api/turn` | `backend/server.py` |
 | HTTP endpoint `POST /api/score` | `backend/server.py` and `backend/audra_service.py` |
@@ -108,18 +107,19 @@ take longer because it downloads and loads the checkpoint.
 `POST /api/turn` request:
 ```json
 {
-  "turn": 1, "totalTurns": 1, "width": 800, "height": 600,
+  "turn": 1, "width": 800, "height": 600,
   "image": "data:image/png;base64,...",
   "actions": [{ "tool": "brush", "color": "#1e1e1e", "size": 8, "opacity": 1,
                 "filled": false, "points": [{ "x": 10, "y": 20 }, ...] }],
-  "mode": "complete", "subject": "cat"
+  "contextActions": [ ...accepted strokes and this turn's actions ],
+  "mode": "complete"
 }
 ```
-`image` holds the whole canvas. `actions` lists only what the human drew this turn, as vectors.
+`image` holds the whole canvas. `actions` lists the human's pen strokes this turn; `contextActions` includes accepted strokes from earlier rounds for model context.
 
-`mode` is `"complete"` (the default) or `"continue"`. `subject` is a category from `GET /api/subjects`, or `"random"` (the default).
+`mode` is `"complete"` (the default) or `"continue"`. The server picks two different subjects.
 
-Response: `{ "image": "data:image/png;base64,...", "message": "optional text", "mode": "complete", "subject": "cat", "aiActions": [ ...same shape as actions ] }`
+Response: `{ "candidates": [{ "image": "data:image/png;base64,...", "mode": "complete", "aiActions": [ ... ], "message": "..." }, { ... }] }`
 
 `POST /api/score` request: `{ "image": "data:image/png;base64,..." }`
 
@@ -128,19 +128,19 @@ clamped to 0–1 and should not be interpreted as a general creativity score.
 
 ## AI drawing models
 
-Choose a mode with the **AI partner** switch and what to draw with **Subject**: one of 95 categories, or "Surprise me". Every mode draws a recognizable object of the subject, and the AI always draws on its turn. If the chosen mode comes up empty or fails, a fallback mode takes over (see `FALLBACKS` in `drawing_models/__init__.py`), and the message says so.
+The **AI partner** switch selects Complete or Continue for both AI choices. Subjects are drawn randomly from 95 Quick, Draw! categories.
 
 | Mode | File | What it does |
 |---|---|---|
-| **Complete** | `complete_model.py` | SketchRNN reads the human's strokes as the start of the subject, then finishes the drawing in place. Draw a cat's head, and it adds the ears and whiskers. |
-| **Continue** | `continue_model.py` | SketchRNN extends the human's strokes: for each one, it reads the whole drawing and keeps the pen down at that stroke's end, so its line grows out of the human's. Then it keeps drawing until the subject is complete. Its first marks always grow out of the human's lines; Complete only adds separate new strokes. |
+| **Complete** | `complete_model.py` | SketchRNN treats the human's strokes as the start of a subject and adds separate strokes. |
+| **Continue** | `continue_model.py` | SketchRNN extends the ends of the human's lines. |
 
 Where the drawings come from:
 
 - **SketchRNN** (`sketch_rnn.py`): [Ha & Eck, 2018](https://arxiv.org/abs/1704.03477). It's a neural network that draws one pen movement at a time. Google trained one per category on the [Quick, Draw! dataset](https://quickdraw.withgoogle.com/data/) (50M human doodles, CC BY 4.0). This is a numpy port of the magenta-js inference code. It loads Google's pretrained weights the first time a category is used and caches them in the temp directory (set `SKETCH_RNN_SIZE=models` to use the smaller 3 MB models).
 
-The 95 subjects are the Quick Draw categories that have a pretrained SketchRNN model. They're listed in `drawing_models/subjects.py` and `SUBJECTS` in `frontend/src/config.ts`.
+The 95 subjects are the Quick Draw categories that have a pretrained SketchRNN model. They're listed in `drawing_models/subjects.py`.
 
 The AI only *adds* strokes, and it draws them in its own color (`AI_COLOR` in `canvas.py`). `canvas.render` pastes every already-inked pixel back on top, so the AI can never erase or paint over existing work.
 
-To add a mode, write a `generate(ctx) -> (strokes, message)` function. Register it in `MODELS` and `FALLBACKS` in `drawing_models/__init__.py` and in `AI_MODES` in `frontend/src/config.ts`.
+To add a mode, write a `generate(ctx) -> (strokes, message)` function and register it in `MODELS` in `drawing_models/__init__.py` and `AI_MODES` in `frontend/src/config.ts`.

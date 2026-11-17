@@ -13,8 +13,11 @@ export async function submitDrawing(payload: SubmitPayload): Promise<AIResponse>
     throw new Error(`AI server responded ${res.status}${detail ? `: ${detail}` : ''}`);
   }
   const data = (await res.json()) as AIResponse;
-  if (typeof data.image !== 'string' || !data.image.startsWith('data:image')) {
-    throw new Error('AI server response is missing a valid "image" data URL');
+  if (!Array.isArray(data.candidates) || data.candidates.length !== 2 ||
+      data.candidates.some((candidate) => typeof candidate.image !== 'string' ||
+        !candidate.image.startsWith('data:image/png;base64,') ||
+        !Array.isArray(candidate.aiActions))) {
+    throw new Error('AI server response is missing two valid candidates');
   }
   return data;
 }
