@@ -48,7 +48,11 @@ export interface SubmitPayload {
   mode: AIMode;
   /** How many candidates Greedy generates. */
   greedyIterations: number;
+  /** Where the AI's subjects come from: interpretations of the drawing, or random. */
+  subjectSource: SubjectSource;
 }
+
+export type SubjectSource = 'recognize' | 'random';
 
 export interface AICandidate {
   /** The combined human + AI drawing as a PNG data URL. */
@@ -89,6 +93,12 @@ export interface TurnReport {
   /** Each returned drawing: its ink, and AuDrA scores for the whole drawing with it and its strokes alone. */
   options?: { ink: number; strokes: number; after?: number; aiOnly?: number }[];
   scoringError?: string;
+  /** What the recognizer thinks the drawing is (only when subjects come from recognition). */
+  recognition?: {
+    guesses: { subject: string; probability: number }[];
+    /** The interpretation each returned option drew. */
+    optionSubjects?: string[];
+  };
   greedy?: {
     iterations: number;
     candidates: GreedyCandidate[];
@@ -97,7 +107,7 @@ export interface TurnReport {
     chosenScore?: number | null;
     scoringError?: string;
   };
-  timings: Partial<Record<'total' | 'model' | 'generate' | 'renderCandidates' | 'scoreCandidates' | 'render' | 'scoreDrawing', number>>;
+  timings: Partial<Record<'total' | 'recognize' | 'model' | 'generate' | 'renderCandidates' | 'scoreCandidates' | 'render' | 'scoreDrawing', number>>;
 }
 
 export type Phase = 'human' | 'ai' | 'choose' | 'done';

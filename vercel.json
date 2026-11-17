@@ -7,7 +7,7 @@
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/index.py": {
-      "includeFiles": "{backend/**/*.py,AuDrA/*.py}"
+      "includeFiles": "{backend/**/*.py,backend/drawing_models/recognizer.npz,AuDrA/*.py}"
     }
   },
   "rewrites": [

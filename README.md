@@ -97,7 +97,8 @@ take longer because it downloads and loads the checkpoint.
 |---|---|
 | Ink limit, canvas size, AI modes, default turns and Greedy candidates | `frontend/src/config.ts` |
 | Console under the canvas (per-turn report) | `frontend/src/components/TurnConsole.tsx` |
-| Tests (no network or checkpoint needed) | `backend/test_ai_model.py`, `backend/test_greedy.py`, `backend/test_score.py`, `frontend/tests/` |
+| Drawing recognition and how it picks subjects | `backend/drawing_models/recognizer.py`; trained by `backend/training/train_recognizer.py` |
+| Tests (no network or checkpoint needed) | `backend/test_ai_model.py`, `backend/test_greedy.py`, `backend/test_recognizer.py`, `backend/test_score.py`, `frontend/tests/` |
 | AI entry point: picks subjects, limits and renders strokes | `backend/ai_model.py` → `generate_drawing()` |
 | The drawing models | `backend/drawing_models/` |
 | HTTP endpoint `POST /api/turn` | `backend/server.py` |
@@ -114,16 +115,16 @@ take longer because it downloads and loads the checkpoint.
   "actions": [{ "tool": "brush", "color": "#1e1e1e", "size": 8, "opacity": 1,
                 "filled": false, "points": [{ "x": 10, "y": 20 }, ...] }],
   "contextActions": [ ...accepted strokes and this turn's actions ],
-  "mode": "complete", "greedyIterations": 10
+  "mode": "complete", "greedyIterations": 10, "subjectSource": "recognize"
 }
 ```
 `image` holds the whole canvas. `actions` lists the human's pen strokes this turn; `contextActions` includes accepted strokes from earlier rounds for model context.
 
-`mode` is `"complete"` (the default), `"continue"`, or `"greedy"`. For Complete and Continue the server picks two different subjects. `greedyIterations` (1–30, default 10) is how many candidates Greedy tries.
+`mode` is `"complete"` (the default), `"continue"`, or `"greedy"`. `subjectSource` is `"recognize"` (the default) or `"random"`. For Complete and Continue the server picks two different subjects. `greedyIterations` (1–30, default 10) is how many candidates Greedy tries.
 
 Response: `{ "candidates": [{ "image": "data:image/png;base64,...", "mode": "complete", "aiActions": [ ... ], "message": "..." }, { ... }], "report": { ... } }`. Greedy returns a single candidate, which the page keeps without asking.
 
-`report` is shown in the page's console: `humanInk` and `inkBudget` (px of line), each returned option's `ink` with AuDrA scores for the whole drawing with it (`after`) and its AI strokes alone (`aiOnly`), the score `before` the turn, Greedy's candidates and choice (`greedy`), and step `timings` in seconds. Subjects are never included. If AuDrA isn't set up, the scores are missing and `scoringError` says why. See `TurnReport` in `frontend/src/types.ts`.
+`report` is shown in the page's console: `humanInk` and `inkBudget` (px of line), each returned option's `ink` with AuDrA scores for the whole drawing with it (`after`) and its AI strokes alone (`aiOnly`), the score `before` the turn, Greedy's candidates and choice (`greedy`), the recognizer's top guesses and the subject each option drew (`recognition`, only when subjects come from recognition), and step `timings` in seconds. With random subjects, subjects are never included. If AuDrA isn't set up, the scores are missing and `scoringError` says why. See `TurnReport` in `frontend/src/types.ts`.
 
 `POST /api/score` request: `{ "image": "data:image/png;base64,..." }`
 
@@ -132,7 +133,7 @@ clamped to 0–1 and should not be interpreted as a general creativity score.
 
 ## AI drawing models
 
-The **AI partner** switch selects Complete or Continue for both AI choices, or Greedy. **Turns** sets how long the game lasts; **Finish drawing** still ends it early, and raising Turns after the last turn picks the game back up. Subjects are drawn randomly from 95 Quick, Draw! categories.
+The **AI partner** switch selects Complete or Continue for both AI choices, or Greedy. **Turns** sets how long the game lasts; **Finish drawing** still ends it early, and raising Turns after the last turn picks the game back up. **Subjects** chooses where the AI's subjects (out of 95 Quick, Draw! categories) come from: *Recognize drawing* (the default; see below) or *Random*.
 
 | Mode | File | What it does |
 |---|---|---|
@@ -149,6 +150,17 @@ The 95 subjects are the Quick Draw categories that have a pretrained SketchRNN m
 The AI only *adds* strokes, and it draws them in its own color (`AI_COLOR` in `canvas.py`). `canvas.render` pastes every already-inked pixel back on top, so the AI can never erase or paint over existing work.
 
 To add a mode, write a `generate(ctx) -> (strokes, message)` function and register it in `MODELS` in `drawing_models/__init__.py` and `AI_MODES` in `frontend/src/config.ts`.
+
+### Recognizing the drawing
+
+With **Subjects: Recognize drawing**, the AI first guesses what's on the canvas, then draws a subject that fits it, but not always the most obvious one.
+
+- **Recognizer** (`drawing_models/recognizer.py`): a small CNN that scores the drawing against the 95 subjects the AI can draw. It was trained on 28×28 [Quick, Draw!](https://quickdraw.withgoogle.com/data/) bitmaps by `training/train_recognizer.py`; the weights are `drawing_models/recognizer.npz` (about 2 MB). It runs in numpy, so it needs no PyTorch and takes a few milliseconds. The canvas's strokes (human and AI) are drawn at 28×28 the way Quick Draw's bitmaps were, then classified.
+- **Choosing subjects** (`recognizer.choose_subjects`): the AI samples among the top 5 guesses that are at least 2% likely, in proportion to probability, but with the single most likely guess weighted down to 35% (`OBVIOUS_WEIGHT`). So a drawing that looks most like a cat might be continued as a tiger or a lion. A duel's two options are two different interpretations; Greedy spreads its candidates across three. If a subject fails to draw, the next interpretation is tried, then random ones.
+- **Console:** the `sees` line lists the top guesses. The `drew` line shows which interpretation each option used; in a duel it's revealed only after the player chooses, like the scores.
+- On a blank canvas, or with **Random**, subjects are random and never reported, as in the original duel.
+
+To retrain (from `backend/`, with torch installed): `python training/train_recognizer.py`. It downloads slices of the Quick Draw bitmaps (~330 MB, cached in the temp directory) and prints validation and end-to-end accuracy.
 
 ### Console and creativity scores
 

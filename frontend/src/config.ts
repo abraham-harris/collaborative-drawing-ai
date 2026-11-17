@@ -1,4 +1,4 @@
-import type { AIMode } from './types';
+import type { AIMode, SubjectSource } from './types';
 
 /** Path length available to each participant on each turn, in canvas pixels. */
 export const INK_LIMIT = 300;
@@ -6,6 +6,13 @@ export const INK_LIMIT = 300;
 /** Default and maximum number of turns in a game (editable on the page; "Finish drawing" ends early). */
 export const DEFAULT_TURNS = 5;
 export const MAX_TURNS = 20;
+
+/** Where the AI's subjects come from (editable on the page). */
+export const SUBJECT_SOURCES: { id: SubjectSource; label: string }[] = [
+  { id: 'recognize', label: 'Recognize drawing' },
+  { id: 'random', label: 'Random' },
+];
+export const DEFAULT_SUBJECT_SOURCE: SubjectSource = 'recognize';
 
 /** How many candidates Greedy generates and ranks by creativity (editable on the page). */
 export const DEFAULT_GREEDY_ITERATIONS = 10;

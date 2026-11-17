@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import complete_model, continue_model, greedy_model
+from . import complete_model, continue_model, greedy_model, recognizer
 from .canvas import DrawingContext, render
 from .strokes import Stroke, stroke_to_action, strokes_from_actions
 from .subjects import RANDOM, SUBJECTS
@@ -31,6 +31,6 @@ MODELS: dict[str, ModelFn] = {
 DEFAULT_MODE = "complete"
 
 __all__ = [
-    "MODELS", "DEFAULT_MODE", "SUBJECTS", "RANDOM", "DrawingContext", "Stroke",
+    "MODELS", "DEFAULT_MODE", "SUBJECTS", "recognizer", "RANDOM", "DrawingContext", "Stroke",
     "render", "stroke_to_action", "strokes_from_actions",
 ]

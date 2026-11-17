@@ -86,10 +86,15 @@ def turn():
             mode=mode,
             iterations=iterations,
             report=report,
+            recognize=payload.get("subjectSource", "recognize") != "random",
         )
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 502
     score_options(image, [(result, ai_actions) for result, _message, ai_actions, _subject in results], report)
+    if "recognition" in report:
+        # Which interpretation each option drew. The page reveals this only after the
+        # player chooses; with random subjects it's never sent (as in the original duel).
+        report["recognition"]["optionSubjects"] = [subject for *_rest, subject in results]
     report.setdefault("timings", {})["total"] = time.perf_counter() - start
 
     return jsonify({"candidates": [

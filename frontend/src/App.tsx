@@ -5,9 +5,10 @@ import ModeSelector from './components/ModeSelector';
 import TurnConsole, { type ConsoleEntry } from './components/TurnConsole';
 import Toolbar from './components/Toolbar';
 import {
-  CANVAS_HEIGHT, CANVAS_WIDTH, DEFAULT_AI_MODE, DEFAULT_GREEDY_ITERATIONS, DEFAULT_TURNS, INK_LIMIT,
+  CANVAS_HEIGHT, CANVAS_WIDTH, DEFAULT_AI_MODE, DEFAULT_GREEDY_ITERATIONS, DEFAULT_SUBJECT_SOURCE, DEFAULT_TURNS,
+  INK_LIMIT,
 } from './config';
-import type { AICandidate, AIMode, BrushSettings, DrawAction, Phase } from './types';
+import type { AICandidate, AIMode, BrushSettings, DrawAction, Phase, SubjectSource } from './types';
 import './App.css';
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
   const [candidates, setCandidates] = useState<AICandidate[] | null>(null);
   const [totalTurns, setTotalTurns] = useState(DEFAULT_TURNS);
   const [greedyIterations, setGreedyIterations] = useState(DEFAULT_GREEDY_ITERATIONS);
+  const [subjectSource, setSubjectSource] = useState<SubjectSource>(DEFAULT_SUBJECT_SOURCE);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export default function App() {
       const response = await submitDrawing({
         turn, totalTurns, width: CANVAS_WIDTH, height: CANVAS_HEIGHT, image, actions,
         contextActions: [...acceptedActionsRef.current, ...actions], mode: aiMode, greedyIterations,
+        subjectSource,
       });
       const { report } = response;
       if (report) setConsoleEntries((entries) => [...entries, { report, kept: null }]);
@@ -64,7 +67,7 @@ export default function App() {
     }
   // acceptCandidate only reads refs and state setters.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, turn, totalTurns, aiMode, greedyIterations]);
+  }, [phase, turn, totalTurns, aiMode, greedyIterations, subjectSource]);
 
   /** Put a candidate on the canvas, remember its strokes, and move to the next turn (or finish). */
   const acceptCandidate = async (candidate: AICandidate, index: number) => {
@@ -214,7 +217,8 @@ export default function App() {
       <ModeSelector mode={aiMode} onChange={setAiMode} disabled={phase !== 'human'}
         totalTurns={totalTurns} minTurns={turn} onTotalTurnsChange={handleTotalTurnsChange}
         iterations={greedyIterations} onIterationsChange={setGreedyIterations}
-        settingsDisabled={phase === 'ai'} />
+        settingsDisabled={phase === 'ai'}
+        subjectSource={subjectSource} onSubjectSourceChange={setSubjectSource} />
 
       {error && <div className="banner banner-error" role="alert">
         <strong>Couldn't continue:</strong> {error}

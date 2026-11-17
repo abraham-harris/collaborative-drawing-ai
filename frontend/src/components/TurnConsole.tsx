@@ -18,6 +18,7 @@ const secs = (n: number | undefined) => (n == null ? '—' : n.toFixed(2));
 const px = (n: number | undefined) => (n == null ? '—' : `${Math.round(n)} px`);
 const signed = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(3)}`;
 const modeLabel = (id: string) => AI_MODES.find((m) => m.id === id)?.label ?? id;
+const subjectLabel = (s: string) => s.replace(/_/g, ' ');
 
 function lines({ report: r, kept }: ConsoleEntry): { key: string; label: string; text: string }[] {
   const out = [];
@@ -32,6 +33,27 @@ function lines({ report: r, kept }: ConsoleEntry): { key: string; label: string;
     text: `you ${px(r.humanInk)} → AI ${inkUsed || '—'}${isDuel ? ' (option 1 / 2)' : ''}`
       + (r.inkBudget != null ? ` · limit ${px(r.inkBudget)}` : ''),
   });
+
+  const rec = r.recognition;
+  if (rec) {
+    out.push({
+      key: 'sees',
+      label: 'sees',
+      text: rec.guesses.map((g) => `${subjectLabel(g.subject)} ${Math.round(g.probability * 100)}%`).join(' · '),
+    });
+    const drew = rec.optionSubjects ?? [];
+    if (drew.length) {
+      out.push({
+        key: 'drew',
+        label: 'drew',
+        // In a duel, keep the choice blind: reveal the interpretations after it's made.
+        text: isDuel && kept == null
+          ? 'two interpretations — shown after you choose'
+          : drew.map((s, i) => (isDuel ? `option ${i + 1}${i === kept ? ' (kept)' : ''}: ` : '') + subjectLabel(s)
+            + (s === rec.guesses[0]?.subject ? ' (top guess)' : '')).join(' · '),
+      });
+    }
+  }
 
   const g = r.greedy;
   if (g && g.candidates.length) {
@@ -80,9 +102,11 @@ function lines({ report: r, kept }: ConsoleEntry): { key: string; label: string;
     });
   }
 
-  const parts = [`${secs(t.total)} s total`, `model ${secs(t.model)}`];
+  const parts = [`${secs(t.total)} s total`];
+  if (t.recognize != null) parts.push(`recognize ${secs(t.recognize)}`);
+  parts.push(`model ${secs(t.model)}`);
   if (t.generate != null) {
-    parts[1] += ` (generate ${secs(t.generate)}, render ${secs(t.renderCandidates)}, score ${secs(t.scoreCandidates)})`;
+    parts[parts.length - 1] += ` (generate ${secs(t.generate)}, render ${secs(t.renderCandidates)}, score ${secs(t.scoreCandidates)})`;
   }
   if (t.render != null) parts.push(`render ${secs(t.render)}`);
   parts.push(`score ${secs(t.scoreDrawing)}`);

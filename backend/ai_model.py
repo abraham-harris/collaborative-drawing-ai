@@ -1,7 +1,11 @@
 """Generate the AI's turn from the canvas.
 
+Subjects come from recognizing the drawing (drawing_models/recognizer.py): the
+AI picks among its top few interpretations, avoiding the most obvious one more
+often than not. On a blank canvas, or with recognition off, they're random.
+
 - Complete / Continue (the dueling_artists design): two limited-ink alternatives
-  with distinct random subjects; the human chooses one to keep.
+  with distinct subjects; the human chooses one to keep.
 - Greedy: the AI tries many alternatives limited to the ink the human drew this
   turn and returns the one AuDrA rates most creative, so there's nothing to choose.
 
@@ -18,7 +22,7 @@ from typing import Any
 
 from PIL import Image
 
-from drawing_models import (DEFAULT_MODE, MODELS, SUBJECTS, DrawingContext, Stroke,
+from drawing_models import (DEFAULT_MODE, MODELS, SUBJECTS, DrawingContext, Stroke, recognizer,
                             render, stroke_to_action, strokes_from_actions)
 from drawing_models.canvas import Scorer
 from drawing_models.strokes import dist, ink_length
@@ -76,6 +80,24 @@ def _audra_scorer() -> Scorer | None:
     return audra_service.score_drawings
 
 
+def pick_subjects(strokes: list[Stroke], n: int, rng: random.Random, recognize: bool,
+                  report: dict[str, Any]) -> list[str]:
+    """n distinct subjects to try, best first: interpretations of the drawing (see
+    recognizer.choose_subjects), then random ones to fill in."""
+    picked: list[str] = []
+    if recognize and strokes and recognizer.available():
+        t = time.perf_counter()
+        guesses = recognizer.recognize([s.points for s in strokes])
+        picked = recognizer.choose_subjects(guesses, n, rng)
+        report["recognition"] = {
+            "guesses": [{"subject": s, "probability": p} for s, p in guesses[:recognizer.TOP_K]],
+        }
+        report["timings"]["recognize"] = time.perf_counter() - t
+        rest = [s for s in SUBJECTS if s not in picked]
+        return picked + rng.sample(rest, n - len(picked))
+    return rng.sample(SUBJECTS, n)
+
+
 def generate_drawing(
     image: Image.Image,
     actions: list[dict[str, Any]],
@@ -86,11 +108,13 @@ def generate_drawing(
     iterations: int = DEFAULT_ITERATIONS,
     scorer: Scorer | None | str = "audra",
     report: dict[str, Any] | None = None,
+    recognize: bool = True,
 ) -> list[tuple[Image.Image, str, list[dict[str, Any]], str]]:
-    """Return two candidates with distinct random subjects, both in the chosen mode.
+    """Return two candidates with distinct subjects, both in the chosen mode.
 
     Greedy returns a single candidate instead (see `_greedy`). `iterations` and
-    `scorer` only affect Greedy. Pass a `report` dict to collect ink and timings.
+    `scorer` only affect Greedy. With `recognize`, subjects are interpretations of
+    the drawing; otherwise random. Pass a `report` dict to collect ink and timings.
     """
     if mode not in MODELS:
         raise ValueError(f"Unknown mode {mode!r}; expected one of {sorted(MODELS)}")
@@ -101,13 +125,14 @@ def generate_drawing(
     strokes = strokes_from_actions(context_actions if context_actions is not None else actions)
     strokes = strokes[-MAX_CONTEXT_STROKES:]
     if mode == "greedy":
-        return _greedy(image, strokes, rng, iterations, scorer, report)
+        subjects = pick_subjects(strokes, GREEDY_SUBJECTS, rng, recognize, report)
+        return _greedy(image, strokes, subjects, rng, iterations, scorer, report)
 
     report["inkBudget"] = INK_LIMIT
     start = time.perf_counter()
     candidates = []
     errors = []
-    for subject in rng.sample(SUBJECTS, min(MAX_SUBJECT_ATTEMPTS, len(SUBJECTS))):
+    for subject in pick_subjects(strokes, min(MAX_SUBJECT_ATTEMPTS, len(SUBJECTS)), rng, recognize, report):
         ctx = DrawingContext.build(image, strokes, subject,
                                    rng=random.Random(rng.getrandbits(64)))
         try:
@@ -130,10 +155,10 @@ def generate_drawing(
     raise RuntimeError("The AI couldn't make two choices this turn")
 
 
-def _greedy(image: Image.Image, strokes: list[Stroke], rng: random.Random, iterations: int,
-            scorer: Scorer | None | str, report: dict[str, Any]):
-    """One candidate: the most creative of `iterations` tries, using only as much ink
-    as the human drew this turn. Subjects are random (and not reported), as in a duel."""
+def _greedy(image: Image.Image, strokes: list[Stroke], subjects: list[str], rng: random.Random,
+            iterations: int, scorer: Scorer | None | str, report: dict[str, Any]):
+    """One candidate: the most creative of `iterations` tries across `subjects`, using
+    only as much ink as the human drew this turn."""
     budget = report["humanInk"]
     report["inkBudget"] = budget
     if budget < MIN_INK:
@@ -141,7 +166,6 @@ def _greedy(image: Image.Image, strokes: list[Stroke], rng: random.Random, itera
     if scorer == "audra":
         scorer = _audra_scorer()
 
-    subjects = rng.sample(SUBJECTS, GREEDY_SUBJECTS)
     ctx = DrawingContext.build(image, strokes, subjects[0], rng=random.Random(rng.getrandbits(64)),
                                ink_budget=budget, iterations=max(1, iterations), subjects=subjects,
                                scorer=scorer, report=report)
@@ -160,7 +184,7 @@ def _greedy(image: Image.Image, strokes: list[Stroke], rng: random.Random, itera
     t = time.perf_counter()
     result = render(image, ai_strokes, ctx.mask)
     report["timings"]["render"] = time.perf_counter() - t
-    subject = report.pop("chosenSubject", subjects[0])  # internal only: subjects stay hidden
+    subject = report.pop("chosenSubject", subjects[0])  # returned in the tuple, not the report
     return [(result, message, [stroke_to_action(s) for s in ai_strokes], subject)]
 
 

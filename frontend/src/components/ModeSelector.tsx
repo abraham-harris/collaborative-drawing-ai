@@ -1,5 +1,5 @@
-import { AI_MODES, MAX_GREEDY_ITERATIONS, MAX_TURNS } from '../config';
-import type { AIMode } from '../types';
+import { AI_MODES, MAX_GREEDY_ITERATIONS, MAX_TURNS, SUBJECT_SOURCES } from '../config';
+import type { AIMode, SubjectSource } from '../types';
 
 interface Props {
   mode: AIMode;
@@ -13,6 +13,8 @@ interface Props {
   onIterationsChange: (iterations: number) => void;
   /** Turn and candidate counts can still change while the AI's options are shown. */
   settingsDisabled: boolean;
+  subjectSource: SubjectSource;
+  onSubjectSourceChange: (source: SubjectSource) => void;
 }
 
 /** Parse a number input, clamped to [min, max]; null while the field is empty or invalid. */
@@ -23,7 +25,7 @@ function clampInput(value: string, min: number, max: number): number | null {
 }
 
 export default function ModeSelector({ mode, onChange, disabled, totalTurns, minTurns, onTotalTurnsChange,
-  iterations, onIterationsChange, settingsDisabled }: Props) {
+  iterations, onIterationsChange, settingsDisabled, subjectSource, onSubjectSourceChange }: Props) {
   const current = AI_MODES.find((m) => m.id === mode);
   return (
     <div className="mode-bar">
@@ -37,6 +39,14 @@ export default function ModeSelector({ mode, onChange, disabled, totalTurns, min
           </button>
         ))}
       </div>
+      <label className="subject-select"
+        title="Recognize: the AI guesses what you drew and picks among its likelier interpretations, not always the most obvious">
+        <span className="mode-title">Subjects</span>
+        <select value={subjectSource} disabled={disabled}
+          onChange={(e) => onSubjectSourceChange(e.target.value as SubjectSource)}>
+          {SUBJECT_SOURCES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+      </label>
       <label className="number-setting" title="How many turns you and the AI take; Finish drawing ends early">
         <span className="mode-title">Turns</span>
         <input type="number" min={minTurns} max={MAX_TURNS} value={totalTurns} disabled={settingsDisabled}
